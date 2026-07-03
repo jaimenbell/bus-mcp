@@ -135,8 +135,6 @@ change.
 
 ## Out of scope
 
-- Any push / public repo (local-only for now -- this fronts our own
-  self-hosted setup, more setup-specific than github-mcp)
 - Authenticating *who* `owner`/`sender` claims to be -- the shared secret
   (v1.1) proves possession of a value, not identity; that stays client-
   asserted the same as before. See the bus's own README for that boundary.
