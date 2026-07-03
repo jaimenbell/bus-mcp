@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from . import routes
+from . import config, routes
 
 SERVER_NAME = "bus-mcp"
 mcp = FastMCP(SERVER_NAME)
@@ -43,7 +43,7 @@ async def read_messages_tool(topic: str | None = None, limit: int = 50) -> dict:
         "live by another owner) comes back as a clean ok=False conflict, not a crash."
     ),
 )
-async def claim_lane_tool(lane: str, owner: str, lease_s: int = 300) -> dict:
+async def claim_lane_tool(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict:
     return routes.claim_lane(lane, owner, lease_s)
 
 
@@ -65,7 +65,7 @@ async def release_lane_tool(lane: str, owner: str) -> dict:
         "held live by you) tells you to (re)claim instead of crashing."
     ),
 )
-async def heartbeat_lane_tool(lane: str, owner: str, lease_s: int = 300) -> dict:
+async def heartbeat_lane_tool(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict:
     return routes.heartbeat_lane(lane, owner, lease_s)
 
 
