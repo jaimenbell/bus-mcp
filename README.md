@@ -31,9 +31,11 @@ tools with typed inputs and typed errors instead of raw HTTP.
 | `heartbeat_lane` | `POST /api/bus/lanes/{lane}/heartbeat` | Renew the lease; 409 if you don't hold it live |
 | `get_bus_status` | `GET /api/bus/status` | Rollup: active lanes, orphaned claims, recent messages, pending action flags |
 
-No auth, no env-gating -- the bus is localhost v1 and every route it exposes
-is coordination-only (store/display/claim), so there's no write-safety knob
-here the way github-mcp has one for real external writes.
+No write-safety *knob* here the way github-mcp has one for real external
+writes -- every bus route is coordination-only (store/display/claim). As of
+coordination-bus **v1.1**, the bus MAY optionally require a shared secret on
+its 4 write routes (default off); this client mirrors that with zero new
+config surface of its own -- see "Write-secret auth (v1.1)" below.
 
 ## Typed errors, never a raw crash
 
@@ -58,6 +60,29 @@ shape above before a tool ever returns. Tests exercise both layers.
 | `BUS_MCP_BASE_URL` | `http://127.0.0.1:8100/api/bus` | Base URL of the coordination bus |
 | `BUS_MCP_TIMEOUT_S` | `10.0` | Per-request timeout (seconds) |
 | `BUS_MCP_LIVE` | unset | Set to `1` to run the real-network smoke test (see Testing) |
+| `BUS_WRITE_SECRET` | unset | Same var the bus itself reads to arm write-auth (v1.1). When set here, every write tool call sends `X-Bus-Secret: <value>` automatically. Unset = no header sent, matching an unarmed bus byte-for-byte. |
+
+## Write-secret auth (v1.1)
+
+The coordination bus can optionally gate its 4 write routes (`post_message`,
+`claim_lane`, `release_lane`, `heartbeat_lane`) behind a shared secret header
+(`X-Bus-Secret`), read from `BUS_WRITE_SECRET` on the bus side. This client
+reads the **same env var name** from its own process and, when set,
+`bus_mcp/client.py`'s `post()` attaches the header to every write call --
+`bus_mcp/routes.py` and every tool caller stay unaware of arming state
+entirely. `client.get()` never attaches the header (GET routes are never
+gated bus-side).
+
+**To use with an armed bus:** set `BUS_WRITE_SECRET` to the same value in
+both the AlphaHive backend's environment and this MCP server's environment
+(e.g. in the config that launches `run_server.py`), then restart both
+processes. If the value is missing or wrong, a write tool call returns the
+normal `{"ok": false, "error": {"type": "bus_api_error", "status_code": 401,
+...}}` shape -- no special-casing needed, it flows through the same typed
+`BusApiError` path as any other 4xx.
+
+**Unset (default):** no header is sent, identical to talking to a bus that
+has never been armed -- zero behavior change from pre-v1.1.
 
 ## Usage examples
 
@@ -112,7 +137,9 @@ change.
 
 - Any push / public repo (local-only for now -- this fronts our own
   self-hosted setup, more setup-specific than github-mcp)
-- Auth on the bus transport (localhost v1, no auth by bus design)
+- Authenticating *who* `owner`/`sender` claims to be -- the shared secret
+  (v1.1) proves possession of a value, not identity; that stays client-
+  asserted the same as before. See the bus's own README for that boundary.
 - Restarting the AlphaHive backend to bring the live bus routes up
   (operator, elevated -- not something this MCP does)
 - Bus v2 execution/approval features (a separate, not-yet-built arc)

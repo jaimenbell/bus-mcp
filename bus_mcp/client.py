@@ -86,12 +86,15 @@ def request(
     *,
     params: dict[str, Any] | None = None,
     json: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Make one request against the bus. Raises BusUnreachable on a network
     failure, BusApiError on a 4xx/5xx, else returns the parsed JSON body."""
     try:
         with httpx.Client(timeout=config.get_timeout_s()) as http_client:
-            response = http_client.request(method, _url(path), params=params, json=json)
+            response = http_client.request(
+                method, _url(path), params=params, json=json, headers=headers
+            )
     except httpx.HTTPError as exc:
         raise BusUnreachable(_unreachable_message(tool), tool=tool) from exc
     except httpx.InvalidURL as exc:
@@ -107,4 +110,11 @@ def get(tool: str, path: str, *, params: dict[str, Any] | None = None) -> dict[s
 
 
 def post(tool: str, path: str, *, json: dict[str, Any] | None = None) -> dict[str, Any]:
-    return request(tool, "POST", path, json=json)
+    """POST to a write route. When BUS_WRITE_SECRET is set in this process's
+    env, automatically attaches the X-Bus-Secret header the coordination-bus
+    v1.1 write-auth dependency expects -- callers (routes.py) never need to
+    know or care whether the bus is armed. Unset (default) sends no header,
+    identical to pre-v1.1 behavior."""
+    secret = config.get_write_secret()
+    headers = {"X-Bus-Secret": secret} if secret is not None else None
+    return request(tool, "POST", path, json=json, headers=headers)

@@ -1,10 +1,14 @@
 """bus_mcp.config -- environment configuration for the bus-mcp server.
 
-The coordination bus is a self-hosted, no-auth, localhost-only v1 service
-(backend/coordination_bus.py in the alphahive repo). There is no write-gate
-here (unlike github-mcp's read/write split) -- every route the bus exposes is
-safe to call; v1 "executes nothing outward-facing" (action_flag is
-store+display only). The only knob is *where* the bus lives.
+The coordination bus is a self-hosted, localhost-only v1 service
+(backend/coordination_bus.py in the alphahive repo). v1 "executes nothing
+outward-facing" (action_flag is store+display only) -- every route is safe to
+call. As of coordination-bus v1.1, the 4 write routes MAY be gated behind an
+optional shared secret (BUS_WRITE_SECRET, header X-Bus-Secret); this client
+mirrors that same env var so arming the bus and arming this MCP is one env
+var set in both processes, not a bus-mcp-specific config surface. Unset (the
+default) means the bus is unarmed -- this client sends no header, matching
+the bus's own default-open behavior byte-for-byte.
 """
 from __future__ import annotations
 
@@ -35,3 +39,12 @@ def get_timeout_s() -> float:
 def is_live_smoke_enabled() -> bool:
     """True when BUS_MCP_LIVE=1 -- gates the real-network smoke test."""
     return os.environ.get("BUS_MCP_LIVE") == "1"
+
+
+def get_write_secret() -> str | None:
+    """Reads BUS_WRITE_SECRET from the environment on every call (not cached),
+    mirroring the bus server's own per-request read -- so tests can
+    monkeypatch it and an operator can arm/disarm without a code change.
+    Empty string counts as unset. None means: send no X-Bus-Secret header,
+    matching the bus's own default-open behavior."""
+    return os.environ.get("BUS_WRITE_SECRET") or None

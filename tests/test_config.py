@@ -42,3 +42,18 @@ def test_live_smoke_enabled_when_set(monkeypatch):
 def test_live_smoke_disabled_for_non_1_value(monkeypatch):
     monkeypatch.setenv("BUS_MCP_LIVE", "true")
     assert config.is_live_smoke_enabled() is False
+
+
+def test_write_secret_none_when_unset(monkeypatch):
+    monkeypatch.delenv("BUS_WRITE_SECRET", raising=False)
+    assert config.get_write_secret() is None
+
+
+def test_write_secret_empty_string_treated_as_unset(monkeypatch):
+    monkeypatch.setenv("BUS_WRITE_SECRET", "")
+    assert config.get_write_secret() is None
+
+
+def test_write_secret_returns_value_when_set(monkeypatch):
+    monkeypatch.setenv("BUS_WRITE_SECRET", "s3cr3t")
+    assert config.get_write_secret() == "s3cr3t"
