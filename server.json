@@ -1,0 +1,10 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jaimenbell/bus-mcp",
+  "description": "MCP server fronting a self-hosted coordination-bus HTTP API: post/read/claim/release/heartbeat.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/jaimenbell/bus-mcp",
+    "source": "github"
+  }
+}
