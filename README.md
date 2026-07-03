@@ -142,5 +142,10 @@ change.
   (operator, elevated -- not something this MCP does)
 - Bus v2 execution/approval features (a separate, not-yet-built arc)
 
+
+## Commercial support
+
+Maintained by [Jaimen Bell](https://jaimenbell.dev). For production MCP integrations, custom servers, or agent-reliability work, see [jaimenbell.dev](https://jaimenbell.dev) or sponsor ongoing maintenance via [GitHub Sponsors](https://github.com/sponsors/jaimenbell).
+
 <!-- MCP registry ownership marker -->
 mcp-name: io.github.jaimenbell/bus-mcp
