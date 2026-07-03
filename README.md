@@ -1,5 +1,10 @@
 # bus-mcp
 
+[![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-55%20%2854%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+
 An ergonomic MCP server fronting the self-hosted **AlphaHive coordination
 bus** (`backend/coordination_bus.py` in the `alphahive` repo) -- so a Claude
 agent calls `claim_lane("feeds-refactor", owner="session-A")` instead of
@@ -8,6 +13,28 @@ to the [desktop-mcp](https://github.com)/[github-mcp](https://github.com)
 standard (own pyproject, fastmcp server, honest README, real test suite) --
 this is that exact "MCP over an HTTP API" pattern turned on our own
 self-hosted API.
+
+## Quickstart (60 seconds)
+
+```bash
+pip install bus-mcp
+```
+
+Add to your Claude Desktop/Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "bus-mcp": {
+      "command": "bus-mcp"
+    }
+  }
+}
+```
+
+No console script on PATH? Fall back to `"command": "python", "args": ["-m", "bus_mcp"]`.
+By default this talks to a bus at `http://127.0.0.1:8100/api/bus` -- see
+"Env vars" below to point it elsewhere.
 
 ## What this is / is not
 
