@@ -1,0 +1,178 @@
+"""respx-mocked tests of bus_mcp.routes -- the normalization layer that
+catches client.BusUnreachable / client.BusApiError and turns them into a
+clean `{"ok": False, "error": {...}}` dict. Proves the "never a raw crash"
+acceptance criterion at the layer server.py tools actually call.
+"""
+from __future__ import annotations
+
+import httpx
+import respx
+
+from bus_mcp import routes
+
+BASE = "http://127.0.0.1:8100/api/bus"
+
+
+@respx.mock
+def test_post_message_success():
+    respx.post(f"{BASE}/message").mock(
+        return_value=httpx.Response(
+            200, json={"id": 1, "topic": "converge", "sender": "a", "body": "hi", "action_flag": False, "ts": "t"}
+        )
+    )
+    result = routes.post_message("converge", "a", "hi")
+    assert result["ok"] is True
+    assert result["id"] == 1
+    assert result["topic"] == "converge"
+
+
+@respx.mock
+def test_read_messages_success_with_topic_filter():
+    route = respx.get(f"{BASE}/messages").mock(
+        return_value=httpx.Response(200, json={"messages": [{"id": 1}]})
+    )
+    result = routes.read_messages(topic="converge", limit=10)
+    assert result["ok"] is True
+    assert result["messages"] == [{"id": 1}]
+    assert route.calls.last.request.url.params["topic"] == "converge"
+
+
+@respx.mock
+def test_read_messages_success_no_topic_filter_omits_param():
+    route = respx.get(f"{BASE}/messages").mock(
+        return_value=httpx.Response(200, json={"messages": []})
+    )
+    routes.read_messages()
+    assert "topic" not in route.calls.last.request.url.params
+
+
+@respx.mock
+def test_claim_lane_success():
+    respx.post(f"{BASE}/lanes/feeds/claim").mock(
+        return_value=httpx.Response(200, json={"ok": True, "decision": "claim", "lane": {"lane": "feeds"}})
+    )
+    result = routes.claim_lane("feeds", "session-A")
+    assert result["ok"] is True
+    assert result["decision"] == "claim"
+
+
+@respx.mock
+def test_claim_lane_conflict_normalizes_to_ok_false():
+    respx.post(f"{BASE}/lanes/feeds/claim").mock(
+        return_value=httpx.Response(409, json={"detail": "lane 'feeds' held by 'other' (lease 120s remaining)"})
+    )
+    result = routes.claim_lane("feeds", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_api_error"
+    assert result["error"]["status_code"] == 409
+    assert "held by 'other'" in result["error"]["message"]
+
+
+@respx.mock
+def test_release_lane_success():
+    respx.post(f"{BASE}/lanes/feeds/release").mock(
+        return_value=httpx.Response(200, json={"ok": True, "decision": "released"})
+    )
+    result = routes.release_lane("feeds", "session-A")
+    assert result["ok"] is True
+    assert result["decision"] == "released"
+
+
+@respx.mock
+def test_release_lane_conflict_normalizes_to_ok_false():
+    respx.post(f"{BASE}/lanes/feeds/release").mock(
+        return_value=httpx.Response(409, json={"detail": "lane 'feeds' held live by another owner"})
+    )
+    result = routes.release_lane("feeds", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_api_error"
+    assert result["error"]["status_code"] == 409
+
+
+@respx.mock
+def test_heartbeat_lane_success():
+    respx.post(f"{BASE}/lanes/feeds/heartbeat").mock(
+        return_value=httpx.Response(200, json={"ok": True, "decision": "heartbeat"})
+    )
+    result = routes.heartbeat_lane("feeds", "session-A")
+    assert result["ok"] is True
+    assert result["decision"] == "heartbeat"
+
+
+@respx.mock
+def test_heartbeat_lane_conflict_normalizes_to_ok_false():
+    respx.post(f"{BASE}/lanes/feeds/heartbeat").mock(
+        return_value=httpx.Response(409, json={"detail": "lane 'feeds' not held live by 'session-A' -- claim it instead"})
+    )
+    result = routes.heartbeat_lane("feeds", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["status_code"] == 409
+    assert "claim it instead" in result["error"]["message"]
+
+
+@respx.mock
+def test_get_bus_status_success():
+    respx.get(f"{BASE}/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "active_lanes": [],
+                "orphaned_claims": [],
+                "recent_messages": [],
+                "_meta": {"active_lane_count": 0, "arms_nothing": True},
+            },
+        )
+    )
+    result = routes.get_bus_status()
+    assert result["ok"] is True
+    assert result["_meta"]["arms_nothing"] is True
+
+
+@respx.mock
+def test_get_bus_status_unreachable_normalizes_to_ok_false():
+    respx.get(f"{BASE}/status").mock(side_effect=httpx.ConnectError("refused"))
+    result = routes.get_bus_status()
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_unreachable"
+    assert "coordination bus isn't reachable" in result["error"]["message"]
+    assert result["error"]["tool"] == "get_bus_status"
+
+
+@respx.mock
+def test_post_message_unreachable_normalizes_to_ok_false():
+    respx.post(f"{BASE}/message").mock(side_effect=httpx.ConnectError("refused"))
+    result = routes.post_message("t", "s", "b")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_unreachable"
+
+
+@respx.mock
+def test_read_messages_unreachable_normalizes_to_ok_false():
+    respx.get(f"{BASE}/messages").mock(side_effect=httpx.ConnectError("refused"))
+    result = routes.read_messages()
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_unreachable"
+
+
+@respx.mock
+def test_claim_lane_unreachable_normalizes_to_ok_false():
+    respx.post(f"{BASE}/lanes/feeds/claim").mock(side_effect=httpx.ConnectError("refused"))
+    result = routes.claim_lane("feeds", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_unreachable"
+
+
+@respx.mock
+def test_release_lane_unreachable_normalizes_to_ok_false():
+    respx.post(f"{BASE}/lanes/feeds/release").mock(side_effect=httpx.ConnectError("refused"))
+    result = routes.release_lane("feeds", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_unreachable"
+
+
+@respx.mock
+def test_heartbeat_lane_unreachable_normalizes_to_ok_false():
+    respx.post(f"{BASE}/lanes/feeds/heartbeat").mock(side_effect=httpx.ConnectError("refused"))
+    result = routes.heartbeat_lane("feeds", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "bus_unreachable"

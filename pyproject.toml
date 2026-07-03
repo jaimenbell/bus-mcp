@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bus-mcp"
+version = "0.1.0"
+description = "Ergonomic MCP server fronting the self-hosted AlphaHive coordination-bus HTTP API (backend/coordination_bus.py) -- post/read/claim/release/heartbeat/status as MCP tools instead of hand-rolled curl. Fast-follow to the coordination-bus arc, github-mcp-shaped (MCP over an HTTP API)."
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp==3.4.2",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.0.3", "respx==0.23.1"]
+
+[tool.setuptools.packages.find]
+include = ["bus_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live: real-network smoke test against a running coordination bus, requires BUS_MCP_LIVE=1",
+]
