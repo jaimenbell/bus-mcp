@@ -141,3 +141,6 @@ change.
 - Restarting the AlphaHive backend to bring the live bus routes up
   (operator, elevated -- not something this MCP does)
 - Bus v2 execution/approval features (a separate, not-yet-built arc)
+
+<!-- MCP registry ownership marker -->
+mcp-name: io.github.jaimenbell/bus-mcp

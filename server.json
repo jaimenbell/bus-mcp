@@ -6,5 +6,15 @@
   "repository": {
     "url": "https://github.com/jaimenbell/bus-mcp",
     "source": "github"
-  }
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "bus-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
 }
