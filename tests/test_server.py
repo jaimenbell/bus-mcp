@@ -38,6 +38,27 @@ def test_no_unexpected_extra_tools():
     assert len(_tool_names()) == 6
 
 
+def _tool_descriptions() -> dict[str, str]:
+    tools = asyncio.run(mcp.list_tools())
+    return {t.name: (t.description or "") for t in tools}
+
+
+def test_claim_and_heartbeat_descriptions_mention_lease_s_clamping():
+    # coordination-bus v1.3+ may grant a shorter lease than requested; an
+    # agent reading the tool description alone (never the source) needs to
+    # know its actual grant can be clamped and that lease_s in the response
+    # is the effective value to check.
+    descriptions = _tool_descriptions()
+    for name in ("claim_lane", "heartbeat_lane"):
+        assert "lease_s" in descriptions[name]
+        assert "clamp" in descriptions[name].lower()
+
+
+def test_get_bus_status_description_mentions_max_lease_seconds():
+    descriptions = _tool_descriptions()
+    assert "max_lease_seconds" in descriptions["get_bus_status"]
+
+
 @pytest.fixture
 def fake_routes(monkeypatch):
     """Monkeypatch every bus_mcp.routes function the server wrappers call,

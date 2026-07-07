@@ -57,6 +57,34 @@ def test_claim_lane_success():
 
 
 @respx.mock
+def test_claim_lane_success_passes_through_lease_s():
+    # coordination-bus v1.3+: claim responses echo the EFFECTIVE (post-clamp)
+    # lease_s granted. routes.py does a generic {"ok": True, **result} merge,
+    # so this new field flows through with zero routes.py code changes --
+    # this test locks that passthrough behavior in place.
+    respx.post(f"{BASE}/lanes/feeds/claim").mock(
+        return_value=httpx.Response(
+            200, json={"ok": True, "decision": "claim", "lane": {"lane": "feeds"}, "lease_s": 3600}
+        )
+    )
+    result = routes.claim_lane("feeds", "session-A", lease_s=7200)
+    assert result["ok"] is True
+    assert result["lease_s"] == 3600
+
+
+@respx.mock
+def test_claim_lane_success_without_lease_s_omits_gracefully():
+    # Pre-v1.3 bus servers don't return lease_s at all. Must not KeyError or
+    # synthesize a value -- the field is simply absent, version-tolerant.
+    respx.post(f"{BASE}/lanes/feeds/claim").mock(
+        return_value=httpx.Response(200, json={"ok": True, "decision": "claim", "lane": {"lane": "feeds"}})
+    )
+    result = routes.claim_lane("feeds", "session-A")
+    assert result["ok"] is True
+    assert "lease_s" not in result
+
+
+@respx.mock
 def test_claim_lane_conflict_normalizes_to_ok_false():
     respx.post(f"{BASE}/lanes/feeds/claim").mock(
         return_value=httpx.Response(409, json={"detail": "lane 'feeds' held by 'other' (lease 120s remaining)"})
@@ -100,6 +128,28 @@ def test_heartbeat_lane_success():
 
 
 @respx.mock
+def test_heartbeat_lane_success_passes_through_lease_s():
+    # Same v1.3+ passthrough as claim_lane -- renewal also echoes the
+    # effective (post-clamp) lease_s.
+    respx.post(f"{BASE}/lanes/feeds/heartbeat").mock(
+        return_value=httpx.Response(200, json={"ok": True, "decision": "heartbeat", "lease_s": 1800})
+    )
+    result = routes.heartbeat_lane("feeds", "session-A", lease_s=3600)
+    assert result["ok"] is True
+    assert result["lease_s"] == 1800
+
+
+@respx.mock
+def test_heartbeat_lane_success_without_lease_s_omits_gracefully():
+    respx.post(f"{BASE}/lanes/feeds/heartbeat").mock(
+        return_value=httpx.Response(200, json={"ok": True, "decision": "heartbeat"})
+    )
+    result = routes.heartbeat_lane("feeds", "session-A")
+    assert result["ok"] is True
+    assert "lease_s" not in result
+
+
+@respx.mock
 def test_heartbeat_lane_conflict_normalizes_to_ok_false():
     respx.post(f"{BASE}/lanes/feeds/heartbeat").mock(
         return_value=httpx.Response(409, json={"detail": "lane 'feeds' not held live by 'session-A' -- claim it instead"})
@@ -126,6 +176,46 @@ def test_get_bus_status_success():
     result = routes.get_bus_status()
     assert result["ok"] is True
     assert result["_meta"]["arms_nothing"] is True
+
+
+@respx.mock
+def test_get_bus_status_passes_through_max_lease_seconds():
+    # coordination-bus v1.3+: GET /status exposes the configured lease
+    # ceiling in _meta.max_lease_seconds. Generic {"ok": True, **result}
+    # merge in routes.py already surfaces this -- test locks it in.
+    respx.get(f"{BASE}/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "active_lanes": [],
+                "orphaned_claims": [],
+                "recent_messages": [],
+                "_meta": {"active_lane_count": 0, "arms_nothing": True, "max_lease_seconds": 3600},
+            },
+        )
+    )
+    result = routes.get_bus_status()
+    assert result["ok"] is True
+    assert result["_meta"]["max_lease_seconds"] == 3600
+
+
+@respx.mock
+def test_get_bus_status_without_max_lease_seconds_omits_gracefully():
+    # Pre-v1.3 bus servers don't include max_lease_seconds in _meta at all.
+    respx.get(f"{BASE}/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "active_lanes": [],
+                "orphaned_claims": [],
+                "recent_messages": [],
+                "_meta": {"active_lane_count": 0, "arms_nothing": True},
+            },
+        )
+    )
+    result = routes.get_bus_status()
+    assert result["ok"] is True
+    assert "max_lease_seconds" not in result["_meta"]
 
 
 @respx.mock

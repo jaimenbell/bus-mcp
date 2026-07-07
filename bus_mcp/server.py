@@ -40,7 +40,14 @@ async def read_messages_tool(topic: str | None = None, limit: int = 50) -> dict:
     description=(
         "Claim a coordination lane before starting work in it: claim-if-free, "
         "steal-if-lease-expired, renew-if-you-already-own-it. A 409 (lane held "
-        "live by another owner) comes back as a clean ok=False conflict, not a crash."
+        "live by another owner) comes back as a clean ok=False conflict, not a crash. "
+        "The bus may grant a shorter lease than requested (server-side ceiling, "
+        "coordination-bus v1.3+): on ok=True the response's top-level `lease_s` is "
+        "the EFFECTIVE (post-clamp) duration actually granted -- always check it "
+        "rather than assuming the requested value was honored. See get_bus_status's "
+        "`_meta.max_lease_seconds` for the currently configured ceiling. Older bus "
+        "servers (pre-v1.3) omit `lease_s` from the response entirely; its absence "
+        "just means the bus predates the ceiling feature, not an error."
     ),
 )
 async def claim_lane_tool(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict:
@@ -62,7 +69,15 @@ async def release_lane_tool(lane: str, owner: str) -> dict:
     name="heartbeat_lane",
     description=(
         "Renew the lease on a coordination lane you hold live. A 409 (not "
-        "held live by you) tells you to (re)claim instead of crashing."
+        "held live by you) tells you to (re)claim instead of crashing. Like "
+        "claim_lane, renewal is subject to the same server-side lease ceiling "
+        "(coordination-bus v1.3+): on ok=True the response's top-level `lease_s` "
+        "is the EFFECTIVE (post-clamp) duration actually granted, which may be "
+        "shorter than requested -- check it rather than assuming the request was "
+        "honored in full. See get_bus_status's `_meta.max_lease_seconds` for the "
+        "currently configured ceiling. Older bus servers (pre-v1.3) omit `lease_s` "
+        "from the response entirely; its absence just means the bus predates the "
+        "ceiling feature, not an error."
     ),
 )
 async def heartbeat_lane_tool(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict:
@@ -73,7 +88,14 @@ async def heartbeat_lane_tool(lane: str, owner: str, lease_s: int = config.DEFAU
     name="get_bus_status",
     description=(
         "Roll-up for the command-center panel: active lanes, orphaned/stale "
-        "claims, recent messages, pending display-only action flags."
+        "claims, recent messages, pending display-only action flags. Also "
+        "exposes `_meta.max_lease_seconds` (coordination-bus v1.3+): the "
+        "currently configured lease ceiling that claim_lane/heartbeat_lane "
+        "requests get silently clamped to. Check this before claiming a lane "
+        "for longer than the default if you need to know whether the request "
+        "will actually be honored in full. Older bus servers (pre-v1.3) omit "
+        "`max_lease_seconds` from `_meta` entirely; its absence just means the "
+        "bus predates the ceiling feature, not an error."
     ),
 )
 async def get_bus_status_tool() -> dict:

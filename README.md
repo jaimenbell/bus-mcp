@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-55%20%2854%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-63%20%2862%20passing%2C%201%20skipped%29-brightgreen)](#testing)
 
 An ergonomic MCP server fronting the self-hosted **AlphaHive coordination
 bus** (`backend/coordination_bus.py` in the `alphahive` repo) -- so a Claude
@@ -53,10 +53,10 @@ tools with typed inputs and typed errors instead of raw HTTP.
 |---|---|---|
 | `post_message` | `POST /api/bus/message` | Append one message to the blackboard (topic, sender, body, action_flag) |
 | `read_messages` | `GET /api/bus/messages` | Recent messages, newest first, optional topic filter |
-| `claim_lane` | `POST /api/bus/lanes/{lane}/claim` | Claim-if-free / steal-if-lease-expired / renew-if-own; 409 if held live by another |
+| `claim_lane` | `POST /api/bus/lanes/{lane}/claim` | Claim-if-free / steal-if-lease-expired / renew-if-own; 409 if held live by another. Response echoes the effective (post-clamp) `lease_s` granted -- see "Lease ceiling" below. |
 | `release_lane` | `POST /api/bus/lanes/{lane}/release` | Free a held lane; 409 if held live by another |
-| `heartbeat_lane` | `POST /api/bus/lanes/{lane}/heartbeat` | Renew the lease; 409 if you don't hold it live |
-| `get_bus_status` | `GET /api/bus/status` | Rollup: active lanes, orphaned claims, recent messages, pending action flags |
+| `heartbeat_lane` | `POST /api/bus/lanes/{lane}/heartbeat` | Renew the lease; 409 if you don't hold it live. Response echoes the effective `lease_s`, same as claim. |
+| `get_bus_status` | `GET /api/bus/status` | Rollup: active lanes, orphaned claims, recent messages, pending action flags, effective `_meta.max_lease_seconds` ceiling |
 
 No write-safety *knob* here the way github-mcp has one for real external
 writes -- every bus route is coordination-only (store/display/claim). As of
@@ -110,6 +110,40 @@ normal `{"ok": false, "error": {"type": "bus_api_error", "status_code": 401,
 
 **Unset (default):** no header is sent, identical to talking to a bus that
 has never been armed -- zero behavior change from pre-v1.1.
+
+## Lease ceiling surfacing (coordination-bus v1.3+)
+
+The bus supports an operator-configurable ceiling on granted lease durations
+(`BUS_MAX_LEASE_SECONDS`, bus-side): a `claim_lane`/`heartbeat_lane` request
+for `lease_s=7200` may be silently **clamped** to a shorter effective grant
+(e.g. 3600s) rather than rejected -- see `coordination_bus.README.md`'s
+"v1.3 - configurable lease ceiling" section in the alphahive repo for the
+full server-side story.
+
+This client surfaces both halves of that contract, additively:
+
+- **`claim_lane` / `heartbeat_lane` responses** include a top-level `lease_s`
+  field on `ok=True` -- the EFFECTIVE (post-clamp) duration actually granted.
+  Always check this rather than assuming the requested `lease_s` was honored
+  in full; a caller that ignores it and heartbeats on its own optimistic
+  schedule risks its lane going stale early.
+- **`get_bus_status`** exposes `_meta.max_lease_seconds` -- the currently
+  configured ceiling, so a caller can check before it even claims.
+
+Both fields are pure passthrough: `bus_mcp/routes.py` merges the bus's raw
+JSON response into the tool result (`{"ok": True, **result}`), so no
+client-side code change was needed to carry these new fields -- only the
+tool descriptions (below) and test coverage locking the behavior in both
+directions. **Version-tolerant by construction:** against a pre-v1.3 bus
+that omits these fields entirely, the tool result simply lacks `lease_s` /
+`max_lease_seconds` -- never a crash, never a synthesized default.
+
+No client-side ceiling caching/pre-flight warning is implemented -- this
+client holds no state between calls (every tool call is a fresh `httpx`
+request), so there is nothing to check a requested `lease_s` against locally
+before the round-trip. A caller that wants to avoid a surprise clamp should
+call `get_bus_status` first and compare its own `lease_s` request against
+`_meta.max_lease_seconds`.
 
 ## Usage examples
 
