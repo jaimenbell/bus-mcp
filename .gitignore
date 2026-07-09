@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 *.egg-info/
 scratchpad/
+dist/
 .env
 .env.*
 .claude.json.bak-*
