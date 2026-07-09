@@ -9,7 +9,7 @@ An ergonomic MCP server fronting the self-hosted **AlphaHive coordination
 bus** (`backend/coordination_bus.py` in the `alphahive` repo) -- so a Claude
 agent calls `claim_lane("feeds-refactor", owner="session-A")` instead of
 hand-rolling `curl -X POST .../lanes/feeds-refactor/claim -d '{...}'`. Built
-to the [desktop-mcp](https://github.com)/[github-mcp](https://github.com)
+to the [desktop-mcp](https://github.com/jaimenbell/desktop-mcp)/[github-mcp](https://github.com/jaimenbell/github-mcp)
 standard (own pyproject, fastmcp server, honest README, real test suite) --
 this is that exact "MCP over an HTTP API" pattern turned on our own
 self-hosted API.
