@@ -1,7 +1,22 @@
 """bus_mcp.server -- FastMCP instance + tool wiring. Six tools, one per
 coordination-bus route (backend/coordination_bus.py in the alphahive repo),
-each a thin async passthrough to bus_mcp.routes. No auth, no write-gate --
-the bus is a localhost-only v1 coordination substrate; every route is safe.
+each a thin async passthrough to bus_mcp.routes.
+
+Auth model (updated 2026-07-10 -- the v1.1 write-secret gate landed the same
+morning this docstring used to say "no auth, no write-gate"):
+  - WRITE routes (claim_lane / release_lane / heartbeat_lane / post_message)
+    require an `X-Bus-Secret` header matching the server's `BUS_WRITE_SECRET`
+    env var, IF that var is set on the backend. Unset (unarmed) = those routes
+    stay open, byte-identical to pre-v1.1 behavior. This client reads the same
+    `BUS_WRITE_SECRET` env var from its own process and sends the header
+    automatically when set.
+  - READ routes (read_messages / get_bus_status) are intentionally NEVER
+    gated, by design, regardless of arming state -- a caller with just the
+    base URL can always read.
+  - `owner` on write calls is a SELF-ASSERTED string, not an authenticated
+    identity: any caller holding the write-secret (or no secret at all, if
+    the server is unarmed) can act as any owner. The secret proves you're an
+    authorized writer, not who you are.
 """
 from __future__ import annotations
 
