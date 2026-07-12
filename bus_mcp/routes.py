@@ -7,9 +7,35 @@ these, and they return whatever these functions return, unmodified.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import client, config
+
+# Security: `lane` is interpolated into the request URL path
+# (f"/lanes/{lane}/claim"). Unsanitized, a value containing "/" or "?" or ".."
+# lets a caller manipulate the same-host endpoint (path injection). Confine it
+# to a strict charset before it is ever placed in a URL. Fail closed with the
+# module's standard ok=False error dict rather than raising.
+_LANE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _invalid_lane_payload(lane: Any, tool: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "type": "invalid_lane",
+            "message": (
+                f"lane {lane!r} is invalid; must match {_LANE_RE.pattern} "
+                "(letters, digits, underscore, hyphen only)."
+            ),
+            "tool": tool,
+        },
+    }
+
+
+def _valid_lane(lane: Any) -> bool:
+    return isinstance(lane, str) and bool(_LANE_RE.match(lane))
 
 
 def _error_payload(exc: client.BusUnreachable | client.BusApiError) -> dict[str, Any]:
@@ -65,6 +91,8 @@ def claim_lane(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> 
     steal-if-lease-expired, renew-if-you-already-own-it. A 409 (lane held
     live by another owner) surfaces as a clean ok=False conflict, not a
     crash -- check `error.type == "bus_api_error"` and `status_code == 409`."""
+    if not _valid_lane(lane):
+        return _invalid_lane_payload(lane, "claim_lane")
     try:
         result = client.post(
             "claim_lane", f"/lanes/{lane}/claim", json={"owner": owner, "lease_s": lease_s}
@@ -77,6 +105,8 @@ def claim_lane(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> 
 def release_lane(lane: str, owner: str) -> dict[str, Any]:
     """Release a lane you hold. A 409 (held live by another owner) surfaces
     as a clean ok=False conflict, not a crash."""
+    if not _valid_lane(lane):
+        return _invalid_lane_payload(lane, "release_lane")
     try:
         result = client.post("release_lane", f"/lanes/{lane}/release", json={"owner": owner})
     except (client.BusUnreachable, client.BusApiError) as exc:
@@ -87,6 +117,8 @@ def release_lane(lane: str, owner: str) -> dict[str, Any]:
 def heartbeat_lane(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict[str, Any]:
     """Renew the lease on a lane you hold live. A 409 (not held live by you)
     surfaces as a clean ok=False conflict telling you to (re)claim instead."""
+    if not _valid_lane(lane):
+        return _invalid_lane_payload(lane, "heartbeat_lane")
     try:
         result = client.post(
             "heartbeat_lane", f"/lanes/{lane}/heartbeat", json={"owner": owner, "lease_s": lease_s}

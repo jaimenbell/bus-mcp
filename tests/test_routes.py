@@ -266,3 +266,36 @@ def test_heartbeat_lane_unreachable_normalizes_to_ok_false():
     result = routes.heartbeat_lane("feeds", "session-A")
     assert result["ok"] is False
     assert result["error"]["type"] == "bus_unreachable"
+
+
+# --- Security: lane path-injection validation (P3) ---
+
+
+def test_claim_lane_rejects_path_injection_without_http_call():
+    """A lane with '/' would manipulate the URL path — must be rejected before
+    any HTTP call, returning the standard ok=False error dict (never raises)."""
+    result = routes.claim_lane("feeds/../status", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "invalid_lane"
+    assert result["error"]["tool"] == "claim_lane"
+
+
+def test_release_lane_rejects_invalid_lane():
+    result = routes.release_lane("a?b=c", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "invalid_lane"
+
+
+def test_heartbeat_lane_rejects_invalid_lane():
+    result = routes.heartbeat_lane("../../admin", "session-A")
+    assert result["ok"] is False
+    assert result["error"]["type"] == "invalid_lane"
+
+
+def test_valid_lane_charset_still_accepted():
+    """Legit lane names (letters/digits/underscore/hyphen) must still pass."""
+    from bus_mcp.routes import _valid_lane
+    assert _valid_lane("feeds") is True
+    assert _valid_lane("lane_1-b") is True
+    assert _valid_lane("bad/lane") is False
+    assert _valid_lane("") is False
