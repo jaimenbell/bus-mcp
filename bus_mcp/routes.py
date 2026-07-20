@@ -59,6 +59,7 @@ def _error_payload(exc: client.BusUnreachable | client.BusApiError) -> dict[str,
     }
 
 
+@config.gated_write
 def post_message(topic: str, sender: str, body: str, action_flag: bool = False) -> dict[str, Any]:
     """Append one message to the bus blackboard (append-only). v1 stores
     action_flag but performs no action -- it is display-only, seen by a human
@@ -86,6 +87,7 @@ def read_messages(topic: str | None = None, limit: int = 50) -> dict[str, Any]:
     return {"ok": True, **result}
 
 
+@config.gated_write
 def claim_lane(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict[str, Any]:
     """Claim a coordination lane before starting work in it: claim-if-free,
     steal-if-lease-expired, renew-if-you-already-own-it. A 409 (lane held
@@ -102,6 +104,7 @@ def claim_lane(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> 
     return {"ok": True, **result}
 
 
+@config.gated_write
 def release_lane(lane: str, owner: str) -> dict[str, Any]:
     """Release a lane you hold. A 409 (held live by another owner) surfaces
     as a clean ok=False conflict, not a crash."""
@@ -114,6 +117,7 @@ def release_lane(lane: str, owner: str) -> dict[str, Any]:
     return {"ok": True, **result}
 
 
+@config.gated_write
 def heartbeat_lane(lane: str, owner: str, lease_s: int = config.DEFAULT_LEASE_S) -> dict[str, Any]:
     """Renew the lease on a lane you hold live. A 409 (not held live by you)
     surfaces as a clean ok=False conflict telling you to (re)claim instead."""
