@@ -3,7 +3,8 @@
 [![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-63%20%2862%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-100%20%2899%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![CI](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml)
 
 An ergonomic MCP server fronting the self-hosted **AlphaHive coordination
 bus** (`backend/coordination_bus.py` in the `alphahive` repo) -- so a Claude
@@ -162,6 +163,10 @@ get_bus_status()
 ```bash
 .venv/Scripts/python.exe -m pytest -q
 ```
+
+CI (`.github/workflows/ci.yml`) runs this suite on every push/PR and fails
+the build if the Tests badge above drifts from what the suite actually
+reports -- see `scripts/check_readme_counts.py`.
 
 All HTTP is mocked via [respx](https://lundberg.github.io/respx/) -- the
 full suite never depends on a live bus. One additional test,
