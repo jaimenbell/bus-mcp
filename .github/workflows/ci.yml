@@ -34,13 +34,26 @@ jobs:
       - name: README count-verification gate
         run: python scripts/check_readme_counts.py --readme README.md --junit-xml junit.xml
 
-      # Dependency CVE scan. WARN-ONLY on purpose: this is the first run, so
-      # the baseline is unknown -- gating now would block every build on
-      # findings nobody has triaged yet.
+      # Dependency vulnerability scan. GATING on TWO independent conditions --
+      # both required, condition 2 is the reason this block exists:
+      #   (1) any HIGH/CRITICAL vulnerability found -- trivy's own exit-code
+      #       mechanism (exit-code: "1" + severity: HIGH,CRITICAL).
+      #   (2) trivy resolved ZERO scan targets -- trivy's pip analyzer
+      #       silently SKIPS manifests it cannot resolve to concrete
+      #       versions. A sibling repo (video-digest) had a fully unpinned
+      #       requirements.txt: trivy printed a clean, empty-looking table
+      #       and the job reported GREEN having scanned absolutely nothing.
+      #       A gate that only fails on findings is fully satisfied by a
+      #       scan that found nothing because it parsed nothing -- condition
+      #       (2) is what makes condition (1) mean something. Verified
+      #       2026-07-30: this repo's requirements.txt DOES parse (1 pip
+      #       target, 0 HIGH/CRITICAL findings), so gating breaks nothing.
       #
-      # To gate later: drop continue-on-error, set exit-code to "1", and add
-      # a .trivyignore entry for any accepted-risk CVE with a dated rationale.
-      - name: Dependency vulnerability scan (warn-only)
+      # Kept as separate, distinctly-named steps below so a red build tells
+      # you immediately which condition fired -- "found a CVE" and "the
+      # scanner went blind" demand completely different responses.
+      - name: "Dependency scan: HIGH/CRITICAL vulnerabilities (gate 1, human-readable)"
+        id: trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         continue-on-error: true
         with:
@@ -48,4 +61,29 @@ jobs:
           scan-ref: .
           scanners: vuln,secret
           severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: "Dependency scan: machine-readable output (for target-parse check)"
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
           exit-code: "0"
+          format: json
+          output: trivy-results.json
+
+      - name: "Gate 2: fail if trivy resolved zero targets (scanner may be blind)"
+        if: always()
+        run: python scripts/check_trivy_targets.py trivy-results.json
+
+      - name: "Gate 1: fail build if HIGH/CRITICAL vulnerabilities were found"
+        if: always()
+        run: |
+          if [ "${{ steps.trivy.outcome }}" = "failure" ]; then
+            echo "::error::trivy found HIGH/CRITICAL vulnerabilities -- see the 'Dependency scan: HIGH/CRITICAL vulnerabilities' step log above for the CVE table. Failing the build."
+            exit 1
+          fi
+          echo "Gate 1 passed -- no HIGH/CRITICAL vulnerabilities found."
