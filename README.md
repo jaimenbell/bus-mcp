@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-332%20%28331%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-344%20%28343%20passing%2C%201%20skipped%29-brightgreen)](#testing)
 [![Tools](https://img.shields.io/badge/tools-24-blue)](#tools)
 [![CI](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml)
 
@@ -191,26 +191,50 @@ shape above before a tool ever returns. Tests exercise both layers.
 | `BUS_MCP_ENABLE_WRITE` | unset (off) | Local write gate. Every mutating tool refuses with a typed `policy_refusal` until this is truthy -- separate from `BUS_WRITE_SECRET`, which authenticates a write against the bus over the wire |
 | `BUS_MCP_ENABLE_TASK_CLAIM` | unset (off) | Second, narrower gate for `claim_task` / `heartbeat_task` / `finish_task`. See "Task claiming is dark by default" |
 | `BUS_MCP_AGENT_ID` | `session:<hostname>:<pid>` | The identity this server asserts on writes and echoes as `agent_id`. See "Identity" |
-| `BUS_WRITE_SECRET` | unset | Same var the bus itself reads to arm write-auth (v1.1). When set here, every write tool call sends `X-Bus-Secret: <value>` automatically. Unset = no header sent, matching an unarmed bus byte-for-byte. |
+| `BUS_WRITE_SECRET` | unset | Same var the bus itself reads to arm write-auth (v1.1). When set here (and `BUS_MACHINE_TOKEN` is NOT set), every write tool call sends `X-Bus-Secret: <value>` automatically. Unset = no header sent, matching an unarmed bus byte-for-byte. |
+| `BUS_MACHINE_TOKEN` | unset | A per-caller, per-scope, revocable machine token (`<token_id>.<secret>`) minted by the AlphaHive backend, sent as `X-Bus-Token`. Takes precedence over `BUS_WRITE_SECRET` when both are set. See "Write auth" below. |
 
-## Write-secret auth (v1.1)
+## Write auth (v1.1 shared secret + v1.2 machine token)
 
 The coordination bus can optionally gate its 4 write routes (`post_message`,
-`claim_lane`, `release_lane`, `heartbeat_lane`) behind a shared secret header
-(`X-Bus-Secret`), read from `BUS_WRITE_SECRET` on the bus side. This client
-reads the **same env var name** from its own process and, when set,
-`bus_mcp/client.py`'s `post()` attaches the header to every write call --
-`bus_mcp/routes.py` and every tool caller stay unaware of arming state
-entirely. `client.get()` never attaches the header (GET routes are never
-gated bus-side).
+`claim_lane`, `release_lane`, `heartbeat_lane`) behind one of two
+credentials, checked by the bus's `require_write_auth` dependency
+(`backend/auth/dependency.py` in the alphahive repo) in this order:
 
-**To use with an armed bus:** set `BUS_WRITE_SECRET` to the same value in
-both the AlphaHive backend's environment and this MCP server's environment
-(e.g. in the config that launches `run_server.py`), then restart both
-processes. If the value is missing or wrong, a write tool call returns the
-normal `{"ok": false, "error": {"type": "bus_api_error", "status_code": 401,
-...}}` shape -- no special-casing needed, it flows through the same typed
-`BusApiError` path as any other 4xx.
+1. **Machine token** (`X-Bus-Token`, from `BUS_MACHINE_TOKEN`) -- a
+   per-caller, per-scope, individually-revocable token minted by the
+   backend. If a token is presented and fails to resolve, the request is
+   **rejected outright** -- it does not fall through to the legacy secret.
+2. **Legacy shared secret** (`X-Bus-Secret`, from `BUS_WRITE_SECRET`) --
+   the original v1.1 credential: one shared value, wildcard-scoped, no
+   per-caller identity.
+
+This client mirrors that precedence exactly and reads the **same two env
+var names** from its own process. `bus_mcp/client.py`'s `post()` attaches
+**at most one** header per call:
+
+- `BUS_MACHINE_TOKEN` set -> sends `X-Bus-Token: <value>` only. The legacy
+  secret, even if also configured, is **not** also sent -- sending both
+  would misrepresent the secret as a fallback the server will actually
+  take when it won't (the server ignores `legacy_secret` entirely once a
+  `machine_token` is presented).
+- `BUS_MACHINE_TOKEN` unset, `BUS_WRITE_SECRET` set -> sends
+  `X-Bus-Secret: <value>` (the original v1.1 behavior, unchanged).
+- Neither set -> no auth header, identical to talking to a bus that has
+  never been armed.
+
+`bus_mcp/routes.py` and every tool caller stay unaware of which credential,
+if any, is configured or which header was chosen. `client.get()` never
+attaches either header (GET routes are never gated bus-side).
+
+**To use with an armed bus:** set the same env var (`BUS_MACHINE_TOKEN` or
+`BUS_WRITE_SECRET`) to the same value in both the AlphaHive backend's
+environment and this MCP server's environment (e.g. in the config that
+launches `run_server.py`), then restart both processes. If the value is
+missing or wrong, a write tool call returns the normal `{"ok": false,
+"error": {"type": "bus_api_error", "status_code": 401, ...}}` shape -- no
+special-casing needed, it flows through the same typed `BusApiError` path
+as any other 4xx.
 
 **Unset (default):** no header is sent, identical to talking to a bus that
 has never been armed -- zero behavior change from pre-v1.1.

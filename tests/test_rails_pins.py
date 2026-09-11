@@ -108,3 +108,20 @@ def test_the_write_secret_value_is_never_logged_or_returned():
                 continue
             assert "print" not in stripped, f"{source.name}:{i} prints the write secret"
             assert "return" not in stripped, f"{source.name}:{i} returns the write secret"
+
+
+def test_the_machine_token_value_is_never_logged_or_returned():
+    """Same discipline as the write-secret pin above, for `get_machine_token`
+    -- nothing may print it, return it, or fold it into a result payload.
+    (Its own `return os.environ.get("BUS_MACHINE_TOKEN") or None` line does
+    not contain the substring "get_machine_token", so it is excluded from
+    this scan the same implicit way the write-secret pin excludes its own
+    definition -- both functions' env-var names differ from their own
+    function names.)"""
+    for source in _SOURCES:
+        for i, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#") or "get_machine_token" not in stripped:
+                continue
+            assert "print" not in stripped, f"{source.name}:{i} prints the machine token"
+            assert "return" not in stripped, f"{source.name}:{i} returns the machine token"

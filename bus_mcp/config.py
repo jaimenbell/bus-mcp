@@ -222,3 +222,24 @@ def get_write_secret() -> str | None:
     Empty string counts as unset. None means: send no X-Bus-Secret header,
     matching the bus's own default-open behavior."""
     return os.environ.get("BUS_WRITE_SECRET") or None
+
+
+def get_machine_token() -> str | None:
+    """Reads BUS_MACHINE_TOKEN from the environment on every call (not
+    cached), mirroring `get_write_secret()`'s per-request-read pattern --
+    tests can monkeypatch it and an operator can arm/disarm without a code
+    change. Empty string counts as unset.
+
+    This is the per-caller scoped machine token the alphahive backend's
+    `require_write_auth` dependency accepts via `X-Bus-Token`
+    (backend/auth/dependency.py `TOKEN_HEADER_NAME`), minted by that repo's
+    CLI -- a narrower-scoped, per-caller-revocable replacement for the
+    wildcard-scoped `BUS_WRITE_SECRET`. None means: `client.post()` falls
+    back to `get_write_secret()` (see that function's own docstring, and
+    `client.py`'s `post()` for the full precedence).
+
+    Same redaction discipline as `get_write_secret()`: this value is NEVER
+    logged, never returned in a tool result, and never folded into an
+    exception message -- `tests/test_rails_pins.py` pins the source-text
+    half of that rule the same way it already does for the write secret."""
+    return os.environ.get("BUS_MACHINE_TOKEN") or None

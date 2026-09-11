@@ -110,11 +110,44 @@ def get(tool: str, path: str, *, params: dict[str, Any] | None = None) -> dict[s
 
 
 def post(tool: str, path: str, *, json: dict[str, Any] | None = None) -> dict[str, Any]:
-    """POST to a write route. When BUS_WRITE_SECRET is set in this process's
-    env, automatically attaches the X-Bus-Secret header the coordination-bus
-    v1.1 write-auth dependency expects -- callers (routes.py) never need to
-    know or care whether the bus is armed. Unset (default) sends no header,
-    identical to pre-v1.1 behavior."""
-    secret = config.get_write_secret()
-    headers = {"X-Bus-Secret": secret} if secret is not None else None
+    """POST to a write route, attaching AT MOST ONE auth header, chosen by a
+    precedence that mirrors the coordination-bus's own credential resolution
+    (alphahive `backend/auth/dependency.py::resolve_principal`):
+
+      1. BUS_MACHINE_TOKEN set -> send `X-Bus-Token: <token>` ONLY. The
+         legacy secret, even if also configured, is NOT sent alongside it.
+      2. else BUS_WRITE_SECRET set -> send `X-Bus-Secret: <secret>` (the
+         pre-existing v1.1 fallback path, unchanged).
+      3. neither set -> no auth header (open, byte-identical to pre-token
+         behavior and to an unarmed bus).
+
+    WHY THE PRECEDENCE IS "TOKEN ONLY, NEVER BOTH" -- mirroring the server,
+    not inventing a client-side rule. `resolve_principal` checks a presented
+    `machine_token` BEFORE it ever looks at `legacy_secret`, and returns
+    immediately on that branch:
+
+        if machine_token:
+            return machine_tokens.resolve(machine_token, now)
+        configured = write_secret._write_secret_provider()
+        ...
+
+    -- so if this client sent both headers, the server would evaluate the
+    token and ignore the secret entirely regardless. That same function's
+    docstring names the "ONE DELIBERATE TIGHTENING" this mirrors: a caller
+    who PRESENTS a credential and it fails to resolve is REJECTED outright,
+    never silently retried against a lower-precedence one (`dependency.py`
+    lines 30-35: "Presenting a credential means 'authenticate me as this';
+    silently downgrading a failed credential to 'open' would make the scope
+    check bypassable"). Sending `X-Bus-Secret` alongside a bad/expired token
+    would misrepresent that as a fallback the server will actually take --
+    it won't, so this client doesn't offer the illusion of one.
+
+    Callers (routes.py) never need to know or care which credential, if any,
+    is configured or which header this function chose."""
+    token = config.get_machine_token()
+    if token is not None:
+        headers = {"X-Bus-Token": token}
+    else:
+        secret = config.get_write_secret()
+        headers = {"X-Bus-Secret": secret} if secret is not None else None
     return request(tool, "POST", path, json=json, headers=headers)

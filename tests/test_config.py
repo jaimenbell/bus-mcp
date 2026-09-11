@@ -57,3 +57,18 @@ def test_write_secret_empty_string_treated_as_unset(monkeypatch):
 def test_write_secret_returns_value_when_set(monkeypatch):
     monkeypatch.setenv("BUS_WRITE_SECRET", "s3cr3t")
     assert config.get_write_secret() == "s3cr3t"
+
+
+def test_machine_token_none_when_unset(monkeypatch):
+    monkeypatch.delenv("BUS_MACHINE_TOKEN", raising=False)
+    assert config.get_machine_token() is None
+
+
+def test_machine_token_empty_string_treated_as_unset(monkeypatch):
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", "")
+    assert config.get_machine_token() is None
+
+
+def test_machine_token_returns_value_when_set(monkeypatch):
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", "tok_abc123.s3cr3t-half")
+    assert config.get_machine_token() == "tok_abc123.s3cr3t-half"

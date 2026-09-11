@@ -175,3 +175,114 @@ def test_get_never_sends_secret_header_even_when_armed(monkeypatch):
     route = respx.get(f"{BASE}/status").mock(return_value=httpx.Response(200, json={"ok": True}))
     client.get("get_bus_status", "/status")
     assert "x-bus-secret" not in route.calls.last.request.headers
+
+
+# -- BUS_MACHINE_TOKEN (X-Bus-Token) + precedence over the legacy secret --------
+# Mirrors alphahive backend/auth/dependency.py::resolve_principal, which checks
+# a presented machine_token BEFORE it ever looks at legacy_secret and returns
+# immediately on that branch -- so this client sends X-Bus-Token ALONE when a
+# token is configured, never alongside X-Bus-Secret, even if a secret is also
+# set. See client.post()'s own docstring for the full precedence rationale.
+
+@respx.mock
+def test_post_sends_no_auth_header_when_neither_configured(monkeypatch):
+    monkeypatch.delenv("BUS_MACHINE_TOKEN", raising=False)
+    monkeypatch.delenv("BUS_WRITE_SECRET", raising=False)
+    route = respx.post(f"{BASE}/message").mock(return_value=httpx.Response(200, json={"id": 1}))
+    client.post("post_message", "/message", json={"topic": "t"})
+    headers = route.calls.last.request.headers
+    assert "x-bus-token" not in headers
+    assert "x-bus-secret" not in headers
+
+
+@respx.mock
+def test_post_sends_token_header_when_token_only_configured(monkeypatch):
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", "tok_id.tok_secret")
+    monkeypatch.delenv("BUS_WRITE_SECRET", raising=False)
+    route = respx.post(f"{BASE}/message").mock(return_value=httpx.Response(200, json={"id": 1}))
+    client.post("post_message", "/message", json={"topic": "t"})
+    headers = route.calls.last.request.headers
+    assert headers["x-bus-token"] == "tok_id.tok_secret"
+    assert "x-bus-secret" not in headers
+
+
+@respx.mock
+def test_post_sends_secret_header_when_secret_only_configured(monkeypatch):
+    monkeypatch.delenv("BUS_MACHINE_TOKEN", raising=False)
+    monkeypatch.setenv("BUS_WRITE_SECRET", "s3cr3t")
+    route = respx.post(f"{BASE}/message").mock(return_value=httpx.Response(200, json={"id": 1}))
+    client.post("post_message", "/message", json={"topic": "t"})
+    headers = route.calls.last.request.headers
+    assert headers["x-bus-secret"] == "s3cr3t"
+    assert "x-bus-token" not in headers
+
+
+@respx.mock
+def test_post_token_wins_over_secret_when_both_configured(monkeypatch):
+    # The precedence case: BOTH env vars set. The token must win and the
+    # secret must NOT be sent alongside it -- mirroring the server, which
+    # would ignore the secret entirely once a machine_token is presented.
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", "tok_id.tok_secret")
+    monkeypatch.setenv("BUS_WRITE_SECRET", "s3cr3t")
+    route = respx.post(f"{BASE}/message").mock(return_value=httpx.Response(200, json={"id": 1}))
+    client.post("post_message", "/message", json={"topic": "t"})
+    headers = route.calls.last.request.headers
+    assert headers["x-bus-token"] == "tok_id.tok_secret"
+    assert "x-bus-secret" not in headers
+
+
+@respx.mock
+def test_get_never_sends_token_header_even_when_armed(monkeypatch):
+    # GET routes are never gated bus-side; client.get() ignores BUS_MACHINE_TOKEN
+    # exactly like it already ignores BUS_WRITE_SECRET.
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", "tok_id.tok_secret")
+    route = respx.get(f"{BASE}/status").mock(return_value=httpx.Response(200, json={"ok": True}))
+    client.get("get_bus_status", "/status")
+    assert "x-bus-token" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_post_401_with_bad_token_raises_bus_api_error(monkeypatch):
+    # Same typed-error path as the legacy-secret 401 case above -- no
+    # special-casing needed in client.py for the token auth-failure mode.
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", "tok_id.wrong-token-secret")
+    respx.post(f"{BASE}/message").mock(
+        return_value=httpx.Response(401, json={"detail": "missing or invalid credentials"})
+    )
+    with pytest.raises(client.BusApiError) as exc_info:
+        client.post("post_message", "/message", json={"topic": "t"})
+    assert exc_info.value.status_code == 401
+
+
+@respx.mock
+def test_machine_token_value_never_appears_in_bus_api_error_text(monkeypatch):
+    """Redaction: the bus's own auth failures return a generic, non-disclosing
+    detail string (dependency.py's `_DENIED_DETAIL` -- byte-identical for
+    every rejection reason), so a correctly-behaving server never echoes the
+    token back. This pins that OUR side doesn't invent a way to leak it
+    either -- the token must not appear anywhere in the raised exception's
+    text, which is the only place a caller-visible string is built from this
+    request."""
+    token = "tok_id.super-secret-token-value-must-not-leak"
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", token)
+    respx.post(f"{BASE}/message").mock(
+        return_value=httpx.Response(401, json={"detail": "missing or invalid credentials"})
+    )
+    with pytest.raises(client.BusApiError) as exc_info:
+        client.post("post_message", "/message", json={"topic": "t"})
+    assert token not in str(exc_info.value)
+    assert token not in repr(exc_info.value)
+
+
+@respx.mock
+def test_machine_token_value_never_appears_in_success_result(monkeypatch):
+    """Redaction, success-path half: a 200 response body containing the
+    request's own headers echoed back (e.g. a debug echo route) must not
+    make it into the parsed result untouched -- pinned here by asserting the
+    real, non-echoing route's result is exactly the mocked body, i.e.
+    client.post() itself adds nothing containing the token to the result."""
+    token = "tok_id.another-secret-must-not-leak"
+    monkeypatch.setenv("BUS_MACHINE_TOKEN", token)
+    respx.post(f"{BASE}/message").mock(return_value=httpx.Response(200, json={"id": 1, "topic": "t"}))
+    result = client.post("post_message", "/message", json={"topic": "t"})
+    assert token not in repr(result)

@@ -4,6 +4,28 @@ All notable changes to bus-mcp. Versions follow the package version in
 `pyproject.toml`, which `tests/test_version.py` pins against `server.json` and
 `bus_mcp.__version__` so the three cannot drift.
 
+## 0.2.2
+
+### Added
+
+- **`BUS_MACHINE_TOKEN` -- a per-caller scoped machine token for write
+  auth.** The alphahive backend's `require_write_auth` dependency
+  (`backend/auth/dependency.py`) accepts a per-caller, per-scope, revocable
+  machine token via `X-Bus-Token` alongside the existing wildcard-scoped
+  `X-Bus-Secret`/`BUS_WRITE_SECRET` shared secret. `bus_mcp/config.py` gains
+  `get_machine_token()` (same per-call env-read, same empty-string-is-unset,
+  same never-logged-never-returned discipline as `get_write_secret()`), and
+  `bus_mcp/client.py`'s `post()` now attaches **at most one** auth header:
+  `X-Bus-Token` when `BUS_MACHINE_TOKEN` is set, else `X-Bus-Secret` when
+  `BUS_WRITE_SECRET` is set, else no header at all. When both env vars are
+  set, the token wins and the secret is **not** also sent -- this mirrors
+  the backend's own `resolve_principal`, which checks a presented
+  `machine_token` before ever looking at `legacy_secret` and returns on
+  that branch immediately, so sending both would misrepresent the secret as
+  a fallback the server will never actually take. Existing
+  `BUS_WRITE_SECRET`-only deployments are unaffected: unset
+  `BUS_MACHINE_TOKEN` reproduces the exact pre-0.2.2 behavior.
+
 ## 0.2.1
 
 ### Changed

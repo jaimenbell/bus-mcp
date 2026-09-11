@@ -5,13 +5,17 @@ pinned by tests/test_server.py and gated against the README by
 tests/test_check_readme_counts.py -- deliberately not restated here as a
 number, because a count in a docstring is a number nothing checks.
 
-Auth model (updated 2026-07-10 -- the v1.1 write-secret gate landed the same
-morning this docstring used to say "no auth, no write-gate"):
-  - WRITE routes require an `X-Bus-Secret` header matching the server's `BUS_WRITE_SECRET`
-    env var, IF that var is set on the backend. Unset (unarmed) = those routes
-    stay open, byte-identical to pre-v1.1 behavior. This client reads the same
-    `BUS_WRITE_SECRET` env var from its own process and sends the header
-    automatically when set.
+Auth model (updated 2026-09-11 -- BUS_MACHINE_TOKEN landed):
+  - WRITE routes accept EITHER a per-caller scoped machine token
+    (`X-Bus-Token`, from `BUS_MACHINE_TOKEN`) OR the legacy shared secret
+    (`X-Bus-Secret`, from `BUS_WRITE_SECRET`), matching whichever the
+    backend's `require_write_auth` dependency has configured -- IF the
+    backend gates the route at all. Unset (unarmed) = those routes stay
+    open, byte-identical to pre-auth behavior. This client reads the same
+    two env var names from its own process; when `BUS_MACHINE_TOKEN` is
+    set it sends `X-Bus-Token` and does NOT also send `X-Bus-Secret`, even
+    if the latter is also configured -- see `bus_mcp.client.post`'s
+    docstring for why (it mirrors the server's own credential precedence).
   - READ routes are intentionally NEVER gated, by design, regardless of
     arming state -- a caller with just the base URL can always read.
   - The three task MUTATIONS carry a SECOND gate, BUS_MCP_ENABLE_TASK_CLAIM,
