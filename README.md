@@ -227,10 +227,13 @@ var names** from its own process. `bus_mcp/client.py`'s `post()` attaches
 if any, is configured or which header was chosen. `client.get()` never
 attaches either header (GET routes are never gated bus-side).
 
-**To use with an armed bus:** set the same env var (`BUS_MACHINE_TOKEN` or
-`BUS_WRITE_SECRET`) to the same value in both the AlphaHive backend's
-environment and this MCP server's environment (e.g. in the config that
-launches `run_server.py`), then restart both processes. If the value is
+**To use with an armed bus:** for the legacy secret, set `BUS_WRITE_SECRET`
+to the same value in both the AlphaHive backend's environment and this MCP
+server's environment, then restart both processes. For a machine token, the
+backend never reads an env var: mint the token on the backend (it stores only
+a hash) and set `BUS_MACHINE_TOKEN` to the minted value in THIS server's
+environment only (e.g. in the config that launches `run_server.py`), then
+restart this server. If the value is
 missing or wrong, a write tool call returns the normal `{"ok": false,
 "error": {"type": "bus_api_error", "status_code": 401, ...}}` shape -- no
 special-casing needed, it flows through the same typed `BusApiError` path
