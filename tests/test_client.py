@@ -57,6 +57,7 @@ def test_timeout_raises_bus_unreachable():
         client.get("get_bus_status", "/status")
 
 
+@pytest.mark.no_respx
 def test_invalid_url_raises_bus_unreachable(monkeypatch):
     monkeypatch.setenv("BUS_MCP_BASE_URL", "not-a-valid-url-scheme")
     with pytest.raises(client.BusUnreachable):

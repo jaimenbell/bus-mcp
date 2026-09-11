@@ -470,3 +470,215 @@ def resolve_thread(
     except (client.BusUnreachable, client.BusApiError) as exc:
         return _error_payload(exc)
     return _ok(result, note_posted=note_posted)
+
+
+# --- validations -----------------------------------------------------------
+#
+# THERE IS DELIBERATELY NO `decide` TOOL, and its absence is pinned by a test
+# (tests/test_rails_pins.py -- which names the route path; this file must not,
+# so the pin can grep for it without exempting comments). The decide route is
+# the one bus route authenticated by the OPERATOR secret, a second secret this
+# MCP server does not hold and must never hold. A quorum this client can
+# request and vote in, but cannot decide, is the whole point of the
+# separation: deciding stays a CLI/paste action the operator performs.
+
+
+def list_validations(
+    limit: int = 50,
+    subject_ref: str | None = None,
+    verdict: str | None = None,
+    thread_id: int | None = None,
+) -> dict[str, Any]:
+    """Validations, newest first (GET /validations, ungated).
+
+    `verdict` is typed as a Literal server-side (pending/confirmed/refuted/
+    indeterminate), so a misspelled filter is a 422 rather than an empty list
+    that reads like 'nothing to refute'."""
+    params = _compact({
+        "limit": limit,
+        "subject_ref": subject_ref,
+        "verdict": verdict,
+        "thread_id": thread_id,
+    })
+    try:
+        result = client.get("list_validations", "/validations", params=params)
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+def get_validation(validation_id: int) -> dict[str, Any]:
+    """ONE validation by id (GET /validations/{id}, ungated).
+
+    Use this rather than scanning `list_validations`: the list is bounded, and
+    a validation older than the page is the exact case where 'no such row'
+    would be a lie about an outstanding refutation. A missing row is a 404
+    here, so 'absent' and 'you could not see it' stay different answers."""
+    try:
+        result = client.get("get_validation", f"/validations/{int(validation_id)}")
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+@config.gated_write
+def request_validation(
+    subject_ref: str,
+    evidence_refs: str | None = None,
+    requested_by: str | None = None,
+    subject_kind: str | None = None,
+) -> dict[str, Any]:
+    """Open a validation on a subject (POST /validations, write-secret gated).
+
+    `subject_ref` is prefixed: 'message:<id>', 'task:<id>' or
+    'proposal:<repo>:<path>'. `subject_kind` is REQUIRED by the bus and is
+    DERIVED FROM THAT PREFIX when omitted -- derived, not defaulted, because a
+    default would silently mis-tier a subject, and the bus refuses a
+    kind/prefix mismatch anyway. A subject_ref with no recognized prefix is
+    refused here with the three valid prefixes named, rather than sent to
+    collect a less specific 422.
+
+    `tier` IS NOT A PARAMETER, deliberately: the bus derives it from the
+    subject and its model forbids the key outright. `evidence_refs` is FREE
+    TEXT (a single string on the wire), not a list -- matching
+    ValidationRequest exactly."""
+    kind = subject_kind
+    if kind is None:
+        for prefix, derived in _SUBJECT_PREFIXES.items():
+            if subject_ref.startswith(prefix):
+                kind = derived
+                break
+    if kind is None:
+        return _client_error(
+            "unknown_subject_kind",
+            "request_validation",
+            subject_ref=subject_ref,
+            reason=(
+                "subject_kind could not be derived from subject_ref. Prefix it "
+                "with one of 'message:', 'task:', 'proposal:' or pass "
+                "subject_kind explicitly -- guessing a kind here would guess a "
+                "tier, and the tier decides who has to sign off."
+            ),
+        )
+    payload = _compact({
+        "subject_kind": kind,
+        "subject_ref": subject_ref,
+        "requested_by": _resolve_agent(requested_by),
+        "evidence_refs": evidence_refs,
+    })
+    try:
+        result = client.post("request_validation", "/validations", json=payload)
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+@config.gated_write
+def vote(
+    validation_id: int,
+    dispatch_id: str,
+    verdict: str,
+    evidence: str,
+    voter: str | None = None,
+) -> dict[str, Any]:
+    """Cast one vote on a validation (POST /validations/{id}/vote).
+
+    `dispatch_id` must be a REGISTERED, still-open dispatch (mint one with
+    `mint_dispatch`) -- the bus refuses a vote cast under an id nobody minted,
+    which is what makes a quorum count something that had to be declared in
+    advance. It is shape-checked here first (12 lowercase hex) because it is
+    interpolated into nothing, but a malformed id is worth a typed refusal
+    rather than a round-trip.
+
+    `verdict` is confirmed / refuted / indeterminate. `evidence` becomes
+    `evidence_ref` on the wire -- the bus's field name, a POINTER (a path, a
+    URL, a message ref), not the argument itself. A voter cannot confirm its
+    own request: the bus answers that 403 `self_confirmation`."""
+    if not isinstance(dispatch_id, str) or not _DISPATCH_ID_RE.match(dispatch_id):
+        return _client_error(
+            "invalid_dispatch_id",
+            "vote",
+            dispatch_id=dispatch_id,
+            reason="dispatch_id must be exactly 12 lowercase hex characters",
+        )
+    payload = {
+        "voter": _resolve_agent(voter),
+        "dispatch_id": dispatch_id,
+        "verdict": verdict,
+        "evidence_ref": evidence,
+    }
+    try:
+        result = client.post(
+            "vote", f"/validations/{int(validation_id)}/vote", json=payload
+        )
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+# --- dispatches ------------------------------------------------------------
+
+def list_dispatches(status: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """Registered dispatches, newest first (GET /dispatches, ungated).
+    `status` is open / reported / expired."""
+    params = _compact({"limit": limit, "status": status})
+    try:
+        result = client.get("list_dispatches", "/dispatches", params=params)
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+@config.gated_write
+def mint_dispatch(
+    lane: str, repo: str, purpose: str, minted_by: str | None = None
+) -> dict[str, Any]:
+    """Register a dispatch so a vote cast under it can be COUNTED
+    (POST /dispatches, write-secret gated). The server mints the 12-hex id.
+
+    The honest limit, restated from the bus's own route: the write secret is
+    the only identity here, so a holder can register a dispatch it never ran.
+    What this buys is not authentication -- it is that a quorum counts
+    something somebody had to declare in advance and can be asked to report
+    on. `minted_by` defaults to this server's agent id.
+
+    DispatchMintRequest sets extra="forbid": a typo'd key is a 422, never a
+    silently-dropped field."""
+    payload = _compact({
+        "minted_by": _resolve_agent(minted_by),
+        "lane": lane,
+        "repo": repo,
+        "purpose": purpose,
+    })
+    try:
+        result = client.post("mint_dispatch", "/dispatches", json=payload)
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+@config.gated_write
+def report_dispatch(dispatch_id: str, report_ref: str) -> dict[str, Any]:
+    """Close the loop on a dispatch: the lane reports, naming its evidence
+    (POST /dispatches/{id}/report).
+
+    `dispatch_id` is interpolated into the URL PATH, so it is confined to the
+    bus's own 12-lowercase-hex shape before it can get there -- same fail-
+    closed reasoning as `lane`. `report_ref` is a POINTER (a report path, a
+    commit, a message ref), not the report text."""
+    if not isinstance(dispatch_id, str) or not _DISPATCH_ID_RE.match(dispatch_id):
+        return _client_error(
+            "invalid_dispatch_id",
+            "report_dispatch",
+            dispatch_id=dispatch_id,
+            reason="dispatch_id must be exactly 12 lowercase hex characters",
+        )
+    try:
+        result = client.post(
+            "report_dispatch",
+            f"/dispatches/{dispatch_id}/report",
+            json={"report_ref": report_ref},
+        )
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)

@@ -96,6 +96,7 @@ class TestAgentIdEcho:
         assert result["error"]["type"] == "bus_unreachable"
         assert result["agent_id"] == "lane:echo"
 
+    @respx.mock
     def test_policy_refusal_carries_agent_id(self, monkeypatch):
         monkeypatch.delenv("BUS_MCP_ENABLE_WRITE", raising=False)
         monkeypatch.setenv("BUS_MCP_AGENT_ID", "lane:echo")

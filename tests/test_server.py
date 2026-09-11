@@ -32,6 +32,13 @@ V2_TOOLS = {
     "open_thread",
     "reply_in_thread",
     "resolve_thread",
+    "list_validations",
+    "get_validation",
+    "request_validation",
+    "vote",
+    "list_dispatches",
+    "mint_dispatch",
+    "report_dispatch",
 }
 
 EXPECTED_TOOLS = V1_TOOLS | V2_TOOLS
@@ -151,6 +158,50 @@ def test_reply_in_thread_tool_passthrough(fake_routes):
 def test_resolve_thread_tool_passthrough(fake_routes):
     asyncio.run(server.resolve_thread_tool(2, resolved_by="lane:a", note="n"))
     assert fake_routes["resolve_thread"] == ((2, "lane:a", "n"), {})
+
+
+def test_list_validations_tool_passthrough(fake_routes):
+    asyncio.run(server.list_validations_tool(10, "message:1", "pending", 2))
+    assert fake_routes["list_validations"] == ((10, "message:1", "pending", 2), {})
+
+
+def test_get_validation_tool_passthrough(fake_routes):
+    asyncio.run(server.get_validation_tool(5))
+    assert fake_routes["get_validation"] == ((5,), {})
+
+
+def test_request_validation_tool_passthrough(fake_routes):
+    asyncio.run(server.request_validation_tool("message:1", "ref"))
+    assert fake_routes["request_validation"] == (("message:1", "ref", None, None), {})
+
+
+def test_vote_tool_passthrough(fake_routes):
+    asyncio.run(server.vote_tool(5, "a1b2c3d4e5f6", "confirmed", "ref"))
+    assert fake_routes["vote"] == ((5, "a1b2c3d4e5f6", "confirmed", "ref", None), {})
+
+
+def test_list_dispatches_tool_passthrough(fake_routes):
+    asyncio.run(server.list_dispatches_tool("open", 10))
+    assert fake_routes["list_dispatches"] == (("open", 10), {})
+
+
+def test_mint_dispatch_tool_passthrough(fake_routes):
+    asyncio.run(server.mint_dispatch_tool("lane", "repo", "purpose"))
+    assert fake_routes["mint_dispatch"] == (("lane", "repo", "purpose", None), {})
+
+
+def test_report_dispatch_tool_passthrough(fake_routes):
+    asyncio.run(server.report_dispatch_tool("a1b2c3d4e5f6", "ref"))
+    assert fake_routes["report_dispatch"] == (("a1b2c3d4e5f6", "ref"), {})
+
+
+def test_read_messages_description_states_the_ignored_filters():
+    """The limitation must be visible to a caller that never opens the
+    source: today's backend ignores thread_id/recipient/since_id."""
+    description = _tool_descriptions()["read_messages"]
+    assert "IGNORES" in description
+    for name in ("thread_id", "recipient", "since_id"):
+        assert name in description
 
 
 def test_claim_lane_tool_passthrough(fake_routes):

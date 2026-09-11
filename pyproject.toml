@@ -27,4 +27,5 @@ testpaths = ["tests"]
 addopts = "-q"
 markers = [
     "live: real-network smoke test against a running coordination bus, requires BUS_MCP_LIVE=1",
+    "no_respx: opt out of the autouse respx guard -- only for tests whose subject is httpx's own URL handling",
 ]

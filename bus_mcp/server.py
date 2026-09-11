@@ -143,7 +143,7 @@ async def get_bus_status_tool() -> dict:
     return routes.get_bus_status()
 
 
-# ── v0.2.0: threads -- the conversation primitive ──────────────────────────
+# â”€â”€ v0.2.0: threads -- the conversation primitive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #
 # Topics stay the broadcast log; THREADS are how two agents (or an agent and
 # the operator) hold one conversation with a beginning and an end. Every tool
@@ -242,6 +242,125 @@ async def resolve_thread_tool(
     thread_id: int, resolved_by: str | None = None, note: str | None = None
 ) -> dict:
     return routes.resolve_thread(thread_id, resolved_by, note)
+
+
+# --- v0.2.0: validations + dispatches -------------------------------------
+#
+# NO `decide` TOOL EXISTS HERE, deliberately and permanently: deciding a
+# validation is authenticated by the operator secret, which this server does
+# not hold. Requesting and voting are agent work; deciding is the operator's.
+
+
+@mcp.tool(
+    name="list_validations",
+    description=(
+        "Validations, newest first (ungated read). Optional filters: "
+        "subject_ref, verdict (pending/confirmed/refuted/indeterminate), "
+        "thread_id. A misspelled verdict is a 422, never a silently empty "
+        "list."
+    ),
+)
+async def list_validations_tool(
+    limit: int = 50,
+    subject_ref: str | None = None,
+    verdict: str | None = None,
+    thread_id: int | None = None,
+) -> dict:
+    return routes.list_validations(limit, subject_ref, verdict, thread_id)
+
+
+@mcp.tool(
+    name="get_validation",
+    description=(
+        "One validation by id (ungated read). Prefer this over scanning "
+        "list_validations: the list is bounded, and a validation older than "
+        "the page is exactly the case where 'no such row' would be a lie "
+        "about an outstanding refutation."
+    ),
+)
+async def get_validation_tool(validation_id: int) -> dict:
+    return routes.get_validation(validation_id)
+
+
+@mcp.tool(
+    name="request_validation",
+    description=(
+        "Open a validation on a subject. `subject_ref` is prefixed -- "
+        "'message:<id>', 'task:<id>' or 'proposal:<repo>:<path>' -- and the "
+        "subject_kind is DERIVED from that prefix rather than defaulted, "
+        "because guessing the kind would guess the tier, and the tier decides "
+        "who signs off. `tier` is not a parameter: the bus derives it. "
+        "`evidence_refs` is free text (a pointer), not a list."
+    ),
+)
+async def request_validation_tool(
+    subject_ref: str,
+    evidence_refs: str | None = None,
+    requested_by: str | None = None,
+    subject_kind: str | None = None,
+) -> dict:
+    return routes.request_validation(subject_ref, evidence_refs, requested_by, subject_kind)
+
+
+@mcp.tool(
+    name="vote",
+    description=(
+        "Cast one vote on a validation. `dispatch_id` must be a REGISTERED, "
+        "still-open dispatch (mint one with mint_dispatch) -- that is what "
+        "makes a quorum count something declared in advance. `verdict` is "
+        "confirmed/refuted/indeterminate; `evidence` is a POINTER to the "
+        "evidence (a path, a commit, a message ref), not the argument itself. "
+        "A voter cannot confirm its own request -- the bus answers 403."
+    ),
+)
+async def vote_tool(
+    validation_id: int,
+    dispatch_id: str,
+    verdict: str,
+    evidence: str,
+    voter: str | None = None,
+) -> dict:
+    return routes.vote(validation_id, dispatch_id, verdict, evidence, voter)
+
+
+@mcp.tool(
+    name="list_dispatches",
+    description=(
+        "Registered dispatches, newest first (ungated read). `status` is "
+        "open/reported/expired. Use it to recover a dispatch id minted in an "
+        "earlier session before voting under it."
+    ),
+)
+async def list_dispatches_tool(status: str | None = None, limit: int = 50) -> dict:
+    return routes.list_dispatches(status, limit)
+
+
+@mcp.tool(
+    name="mint_dispatch",
+    description=(
+        "Register a dispatch so a vote cast under it can be counted; the "
+        "server mints the 12-hex id. The honest limit: the write secret is "
+        "the only identity, so this proves a dispatch was DECLARED, not that "
+        "it ran. `minted_by` defaults to this server's agent id."
+    ),
+)
+async def mint_dispatch_tool(
+    lane: str, repo: str, purpose: str, minted_by: str | None = None
+) -> dict:
+    return routes.mint_dispatch(lane, repo, purpose, minted_by)
+
+
+@mcp.tool(
+    name="report_dispatch",
+    description=(
+        "Close the loop on a dispatch: report against its id, naming the "
+        "evidence. `report_ref` is a POINTER (report path, commit, message "
+        "ref), not the report text."
+    ),
+)
+async def report_dispatch_tool(dispatch_id: str, report_ref: str) -> dict:
+    return routes.report_dispatch(dispatch_id, report_ref)
+
 
 
 if __name__ == "__main__":

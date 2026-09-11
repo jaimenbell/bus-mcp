@@ -5,6 +5,7 @@ deterministically regardless of the developer's real env."""
 from __future__ import annotations
 
 import pytest
+import respx
 
 TEST_BASE_URL = "http://127.0.0.1:8100/api/bus"
 
@@ -14,6 +15,31 @@ def _pin_base_url(monkeypatch):
     monkeypatch.setenv("BUS_MCP_BASE_URL", TEST_BASE_URL)
     monkeypatch.delenv("BUS_MCP_TIMEOUT_S", raising=False)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _block_unmocked_network(request):
+    """NO TEST MAY REACH A REAL BUS. Discovered the hard way while running a
+    positive control: a gate test that forgot its own `@respx.mock` posted a
+    task claim to the LIVE backend on 127.0.0.1:8100 and passed on its 401.
+    A per-test decorator is opt-in, and the tests that most need the guard --
+    the refusal tests, which assert a call does NOT happen -- are exactly the
+    ones where forgetting it is invisible.
+
+    So the guard is autouse. An unmocked request raises AllMockedAssertionError
+    instead of leaving the process; test-level `respx.mock` routers nest
+    inside this one and take precedence.
+
+    Two exemptions, both MARKED rather than name-matched: `live` (a
+    real-network smoke test reaching the network is the entire point) and
+    `no_respx` (a test whose subject is httpx's OWN url handling -- respx
+    intercepts before httpx can raise InvalidURL, so mocking it would hide
+    the very behaviour under test)."""
+    if "live" in request.keywords or "no_respx" in request.keywords:
+        yield
+        return
+    with respx.mock:
+        yield
 
 
 @pytest.fixture(autouse=True)

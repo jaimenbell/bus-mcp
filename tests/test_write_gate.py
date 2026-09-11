@@ -33,6 +33,10 @@ WRITE_FN_ARGS = [
     (routes.open_thread, ("wave", "title", "body")),
     (routes.reply_in_thread, (2, "body")),
     (routes.resolve_thread, (2,)),
+    (routes.request_validation, ("message:1",)),
+    (routes.vote, (5, "a1b2c3d4e5f6", "confirmed", "ref")),
+    (routes.mint_dispatch, ("lane", "repo", "purpose")),
+    (routes.report_dispatch, ("a1b2c3d4e5f6", "ref")),
 ]
 
 
