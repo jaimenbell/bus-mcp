@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-282%20%28281%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-314%20%28313%20passing%2C%201%20skipped%29-brightgreen)](#testing)
 [![Tools](https://img.shields.io/badge/tools-24-blue)](#tools)
 [![CI](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml)
 
@@ -294,11 +294,15 @@ mattered most -- on refusal tests, which assert that a call does *not*
 happen.) One additional test,
 `tests/test_live_smoke.py::test_live_get_bus_status_returns_rollup`, is
 gated behind `BUS_MCP_LIVE=1` and calls a real running bus's `get_bus_status`
-route. **As of this writing the bus routes are dormant/404 on the live
-`:8100` AlphaHive backend** until the operator restarts it with
-`coordination_bus.py`'s router mounted -- so that one gated test is expected
-to skip (or fail if forced) until that restart happens. That is correct
-behavior, not a bug in this repo.
+route. It skips unless you set that variable, which is why the suite reports
+one skip.
+
+The bus routes are live on a running backend -- point `BUS_MCP_BASE_URL` at
+yours and that test passes. A `404` from one of them does not mean the route
+is wrong: it means the backend is running a build older than the route, and
+the tool result says so, carrying `status_code: 404` in the same typed
+`bus_api_error` shape as any other response. Update the backend or use the
+tools that its build does serve.
 
 ## Install / connect
 

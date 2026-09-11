@@ -254,3 +254,52 @@ class TestDispatches:
             return_value=httpx.Response(401, json={"detail": "nope"})
         )
         assert routes.list_dispatches()["error"]["status_code"] == 401
+
+
+# ---------------------------------------------------------------------------
+# The module's "never a raw exception" contract, on the paths that broke it
+#
+# A bare int() / .startswith() inside the try block does not honour the
+# header's promise: ValueError and AttributeError are not in the except
+# tuple. Unreachable through MCP (FastMCP rejects a bad type at the tool
+# boundary), but this module is importable as a library, and a contract that
+# holds only because something upstream enforces it is not the written
+# contract. Each test below CRASHED before the fix.
+# ---------------------------------------------------------------------------
+
+class TestNeverRaises:
+    @respx.mock
+    @pytest.mark.parametrize("bad", ["abc", None, "1; DROP", "", 0, -3, [7]])
+    def test_get_validation_returns_an_error_dict_never_raises(self, bad):
+        result = routes.get_validation(bad)
+        assert result["ok"] is False
+        assert result["error"]["type"] == "invalid_id"
+        assert result["error"]["field"] == "validation_id"
+
+    @respx.mock
+    @pytest.mark.parametrize("bad", ["abc", None, "", 0, -1])
+    def test_vote_returns_an_error_dict_never_raises(self, bad):
+        result = routes.vote(bad, "a1b2c3d4e5f6", "confirmed", "ref")
+        assert result["ok"] is False
+        assert result["error"]["type"] == "invalid_id"
+
+    @respx.mock
+    @pytest.mark.parametrize("bad", [None, 7, ["message:1"], {"a": 1}])
+    def test_request_validation_non_string_subject_ref_never_raises(self, bad):
+        result = routes.request_validation(bad)
+        assert result["ok"] is False
+        assert result["error"]["type"] == "invalid_subject_ref"
+
+    @respx.mock
+    def test_a_valid_id_still_reaches_the_network(self):
+        """STAYS SILENT: the coercion must not refuse a legitimate id."""
+        route = respx.get(f"{BASE}/validations/5").mock(
+            return_value=httpx.Response(200, json={"ok": True, "validation": {"id": 5}})
+        )
+        assert routes.get_validation("5")["ok"] is True
+        assert route.called
+
+    @respx.mock
+    def test_every_tool_result_including_these_refusals_carries_agent_id(self):
+        assert "agent_id" in routes.get_validation("abc")
+        assert "agent_id" in routes.request_validation(None)

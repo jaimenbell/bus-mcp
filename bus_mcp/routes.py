@@ -44,6 +44,32 @@ def _valid_lane(lane: Any) -> bool:
     return isinstance(lane, str) and bool(_LANE_RE.match(lane))
 
 
+def _coerce_id(value: Any, field: str, tool: str) -> tuple[int | None, dict[str, Any] | None]:
+    """Coerce a path-embedded numeric id, returning (id, error_payload).
+
+    THE MODULE'S CONTRACT IS "never a raw exception" (see the header), and a
+    bare `int(value)` inside the try block does not honour it: ValueError is
+    not in the except tuple, so `int("abc")` propagated a traceback instead of
+    returning the error dict. Unreachable through MCP -- FastMCP rejects a
+    bad type at the tool boundary before this module is entered -- but this
+    module is importable as a library, and a contract that holds only because
+    something upstream happens to enforce it is not the contract that is
+    written down."""
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return None, _client_error(
+            "invalid_id", tool, field=field, value=repr(value),
+            reason=f"{field} must be an integer; it is interpolated into the request URL",
+        )
+    if coerced < 1:
+        return None, _client_error(
+            "invalid_id", tool, field=field, value=repr(value),
+            reason=f"{field} must be >= 1 (the bus pins the same bound on its path param)",
+        )
+    return coerced, None
+
+
 def _valid_task_id(task_id: Any) -> bool:
     """Fail-closed path guard for a value interpolated into the request URL.
 
@@ -473,6 +499,9 @@ def resolve_thread(
     that happened. If the reply fails the thread is left OPEN and the error is
     returned: a note that vanished and a thread closed without its stated
     reason is the failure mode this ordering avoids."""
+    coerced_id, id_err = _coerce_id(thread_id, "thread_id", "resolve_thread")
+    if id_err is not None:
+        return id_err
     who = _resolve_agent(resolved_by)
     if who.strip().lower() == _OPERATOR_ROLE:
         return _client_error(
@@ -494,7 +523,7 @@ def resolve_thread(
     try:
         result = client.post(
             "resolve_thread",
-            f"/threads/{int(thread_id)}/resolve",
+            f"/threads/{coerced_id}/resolve",
             json={"resolved_by": who},
         )
     except (client.BusUnreachable, client.BusApiError) as exc:
@@ -544,8 +573,11 @@ def get_validation(validation_id: int) -> dict[str, Any]:
     a validation older than the page is the exact case where 'no such row'
     would be a lie about an outstanding refutation. A missing row is a 404
     here, so 'absent' and 'you could not see it' stay different answers."""
+    coerced_id, id_err = _coerce_id(validation_id, "validation_id", "get_validation")
+    if id_err is not None:
+        return id_err
     try:
-        result = client.get("get_validation", f"/validations/{int(validation_id)}")
+        result = client.get("get_validation", f"/validations/{coerced_id}")
     except (client.BusUnreachable, client.BusApiError) as exc:
         return _error_payload(exc)
     return _ok(result)
@@ -572,6 +604,15 @@ def request_validation(
     subject and its model forbids the key outright. `evidence_refs` is FREE
     TEXT (a single string on the wire), not a list -- matching
     ValidationRequest exactly."""
+    if not isinstance(subject_ref, str):
+        # `.startswith` on a non-str raised AttributeError straight through
+        # the except tuple below, which catches only the two bus exceptions.
+        return _client_error(
+            "invalid_subject_ref",
+            "request_validation",
+            value=repr(subject_ref),
+            reason="subject_ref must be a string, prefixed message:/task:/proposal:",
+        )
     kind = subject_kind
     if kind is None:
         for prefix, derived in _SUBJECT_PREFIXES.items():
@@ -624,6 +665,9 @@ def vote(
     `evidence_ref` on the wire -- the bus's field name, a POINTER (a path, a
     URL, a message ref), not the argument itself. A voter cannot confirm its
     own request: the bus answers that 403 `self_confirmation`."""
+    coerced_id, id_err = _coerce_id(validation_id, "validation_id", "vote")
+    if id_err is not None:
+        return id_err
     if not isinstance(dispatch_id, str) or not _DISPATCH_ID_RE.match(dispatch_id):
         return _client_error(
             "invalid_dispatch_id",
@@ -639,7 +683,7 @@ def vote(
     }
     try:
         result = client.post(
-            "vote", f"/validations/{int(validation_id)}/vote", json=payload
+            "vote", f"/validations/{coerced_id}/vote", json=payload
         )
     except (client.BusUnreachable, client.BusApiError) as exc:
         return _error_payload(exc)

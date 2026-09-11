@@ -24,10 +24,17 @@ _spec.loader.exec_module(check_readme_counts)
 
 
 # ---------------------------------------------------------------------------
-# parse_claimed_counts -- anchored to the real README badge phrasing:
-#   [![Tests](https://img.shields.io/badge/tests-63%20%2862%20passing%2C%201%20skipped%29-brightgreen)](#testing)
-# i.e. a shields.io badge URL where the label text is URL-encoded:
-#   "tests-63 (62 passing, 1 skipped)-brightgreen" percent-encoded.
+# parse_claimed_counts -- anchored to the real README badge SHAPE:
+#   [![Tests](https://img.shields.io/badge/tests-<N>%20%28<P>%20passing%2C%20<S>%20skipped%29-brightgreen)](#testing)
+# i.e. a shields.io badge URL whose label text is "tests-<N> (<P> passing,
+# <S> skipped)-brightgreen", percent-encoded.
+#
+# THE FIXTURES BELOW USE SYNTHETIC NUMBERS ON PURPOSE. A parser test needs a
+# self-consistent input, not the suite's current count -- pinning the real
+# count here would create a second copy of it that nothing checks, in the one
+# file whose entire job is preventing exactly that. The real count is
+# compared against the real README by the CI gate and, for tools, by
+# test_readme_tool_badge_matches_the_live_registered_tool_count below.
 # ---------------------------------------------------------------------------
 
 def test_parse_claimed_counts_matches_real_badge_phrasing():
@@ -35,11 +42,11 @@ def test_parse_claimed_counts_matches_real_badge_phrasing():
         """
         # bus-mcp
 
-        [![Tests](https://img.shields.io/badge/tests-63%20%2862%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+        [![Tests](https://img.shields.io/badge/tests-7%20%286%20passing%2C%201%20skipped%29-brightgreen)](#testing)
         """
     )
     claim = check_readme_counts.parse_claimed_counts(readme)
-    assert claim == check_readme_counts.Counts(total=63, passed=62, skipped=1)
+    assert claim == check_readme_counts.Counts(total=7, passed=6, skipped=1)
 
 
 def test_parse_claimed_counts_missing_claim_returns_none():
@@ -135,6 +142,9 @@ def test_main_exits_zero_on_match(tmp_path):
 
 
 def test_main_exits_nonzero_on_drift(tmp_path):
+    # The claimed number stays deliberately WRONG and deliberately NOT the
+    # suite's real count: a drift fixture pointed at the current number
+    # becomes a no-op the day the suite happens to reach it.
     readme = tmp_path / "README.md"
     readme.write_text(
         "[![Tests](https://img.shields.io/badge/tests-63%20%2862%20passing%2C%201%20skipped%29-brightgreen)](#testing)\n",

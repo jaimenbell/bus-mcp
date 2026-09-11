@@ -15,7 +15,17 @@ Three bus routes are operator-authority, each for its own reason:
 
 A rule written in a docstring is a wish. These tests are what make it a rule:
 two independent pins per route (source text AND registered surface), so
-deleting one does not silently retire the constraint. Scope is stated with
+deleting one does not silently retire the constraint.
+
+WHAT THE SOURCE PINS CANNOT SEE, named here rather than left to be discovered:
+they are literal substring greps, so a path ASSEMBLED FROM VARIABLES
+(`f"/validations/{id}/{action}"` with `action` built at runtime) slips every
+one of them. The backstop is the exact-tool-set allowlist in
+`test_server.py::test_no_unexpected_extra_tools` plus both README tool gates
+in `test_check_readme_counts.py` -- a review's evasion probe tripped four of
+those. That is a COVERAGE pin doing a RAILS pin's job, and a developer adding
+the tool would naturally update the allowlist, so the residual risk is real
+and is recorded rather than claimed away. Scope is stated with
 the pattern, per the same discipline: the greps run over `bus_mcp/*.py` only
 -- this file's own prose is deliberately outside the scanned set, which is
 why it can name the forbidden paths at all.

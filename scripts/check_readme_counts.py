@@ -10,7 +10,7 @@ Stdlib-only by design (no new test/CI dependency).
 
 README phrasing this anchors to (see README.md's shields.io Tests badge):
 
-    [![Tests](https://img.shields.io/badge/tests-63%20%2862%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+    [![Tests](https://img.shields.io/badge/tests-<N>%20%28<P>%20passing%2C%20<S>%20skipped%29-brightgreen)](#testing)
 
 The badge label is a URL-encoded "tests-<N> (<P> passing, <S> skipped)"
 string, i.e. "tests-<N>%20%28<P>%20passing%2C%20<S>%20skipped%29". If that

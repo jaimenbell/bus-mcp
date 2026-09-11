@@ -1,18 +1,21 @@
-"""bus_mcp.server -- FastMCP instance + tool wiring. Six tools, one per
+"""bus_mcp.server -- FastMCP instance + tool wiring. One tool per wrapped
 coordination-bus route (backend/coordination_bus.py in the alphahive repo),
-each a thin async passthrough to bus_mcp.routes.
+each a thin async passthrough to bus_mcp.routes. The exact registered set is
+pinned by tests/test_server.py and gated against the README by
+tests/test_check_readme_counts.py -- deliberately not restated here as a
+number, because a count in a docstring is a number nothing checks.
 
 Auth model (updated 2026-07-10 -- the v1.1 write-secret gate landed the same
 morning this docstring used to say "no auth, no write-gate"):
-  - WRITE routes (claim_lane / release_lane / heartbeat_lane / post_message)
-    require an `X-Bus-Secret` header matching the server's `BUS_WRITE_SECRET`
+  - WRITE routes require an `X-Bus-Secret` header matching the server's `BUS_WRITE_SECRET`
     env var, IF that var is set on the backend. Unset (unarmed) = those routes
     stay open, byte-identical to pre-v1.1 behavior. This client reads the same
     `BUS_WRITE_SECRET` env var from its own process and sends the header
     automatically when set.
-  - READ routes (read_messages / get_bus_status) are intentionally NEVER
-    gated, by design, regardless of arming state -- a caller with just the
-    base URL can always read.
+  - READ routes are intentionally NEVER gated, by design, regardless of
+    arming state -- a caller with just the base URL can always read.
+  - The three task MUTATIONS carry a SECOND gate, BUS_MCP_ENABLE_TASK_CLAIM,
+    stacked under the write gate. See bus_mcp.config.GROUP_TASK_CLAIM.
   - `owner` on write calls is a SELF-ASSERTED string, not an authenticated
     identity: any caller holding the write-secret (or no secret at all, if
     the server is unarmed) can act as any owner. The secret proves you're an

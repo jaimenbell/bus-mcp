@@ -498,3 +498,33 @@ class TestResolveThread:
         )
         result = routes.resolve_thread(2, resolved_by="lane:a")
         assert result["error"]["status_code"] == 403
+
+
+class TestResolveThreadNeverRaises:
+    """`int(thread_id)` sat inside the try block with ValueError outside the
+    except tuple -- so a non-numeric thread_id raised through the module's
+    "never a raw exception" contract instead of returning the error dict."""
+
+    @respx.mock
+    @pytest.mark.parametrize("bad", ["abc", None, "", 0, -2, ["1"]])
+    def test_bad_thread_id_returns_an_error_dict(self, bad):
+        result = routes.resolve_thread(bad, resolved_by="lane:a")
+        assert result["ok"] is False
+        assert result["error"]["type"] == "invalid_id"
+        assert result["error"]["field"] == "thread_id"
+
+    @respx.mock
+    def test_the_operator_refusal_still_wins_over_a_valid_id(self):
+        """Order check: a well-formed id must not let an operator claim
+        through, and a bad id must not mask one either."""
+        assert routes.resolve_thread(2, resolved_by="operator")["error"]["type"] == (
+            "operator_resolution_refused"
+        )
+
+    @respx.mock
+    def test_a_numeric_string_id_still_reaches_the_network(self):
+        route = respx.post(f"{BASE}/threads/2/resolve").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+        assert routes.resolve_thread("2", resolved_by="lane:a")["ok"] is True
+        assert route.called

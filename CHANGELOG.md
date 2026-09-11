@@ -6,10 +6,15 @@ All notable changes to bus-mcp. Versions follow the package version in
 
 ## 0.2.0
 
-The server wrapped 6 of the coordination bus's 26 routes, so an agent could
-broadcast but not converse, could not see the work board, and could not open
-or vote in a validation. This release wraps 18 more (24 tools) and, just as
+The server wrapped messages, lanes and status, so an agent could broadcast
+but not converse, could not see the work board, and could not open or vote in
+a validation. This release adds the coordination bus's thread, validation,
+dispatch, board, worker and event routes -- 24 tools in all -- and, just as
 deliberately, keeps three routes unwrapped forever.
+
+(No route total is quoted here on purpose: the bus's route count is a moving
+number owned by another repo, and a proof number this changelog cannot
+re-derive is one it should not print.)
 
 ### Added
 

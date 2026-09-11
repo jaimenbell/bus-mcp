@@ -314,11 +314,60 @@ class TestTaskMutationShapes:
         assert _sent(route)["verify_passed"] is False
 
     @respx.mock
-    @pytest.mark.parametrize("bad", ["../../status", "t1/../x", "t 1", ""])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            # THE VECTOR THAT ACTUALLY MATTERS (found in review). This one
+            # normalizes to /api/bus/lanes/converge/claim -- a REAL, LIVE
+            # WRITE ROUTE. `ClaimRequest` is not extra="forbid", so the
+            # claim_token is silently dropped, `owner` satisfies the model,
+            # and the call SUCCEEDS AS A LANE CLAIM/STEAL while the caller
+            # believes it claimed a board task. Same for /heartbeat.
+            "../lanes/converge",
+            "../lanes/converge/x",
+            # Kept for coverage, but honestly labelled: this one is NOT
+            # exploitable. It normalizes to /api/status/claim, because the
+            # literal "/claim" suffix survives every dot-segment collapse --
+            # which is also why the minting and sweep routes are structurally
+            # unreachable through these three tools even without the guard.
+            "../../status",
+            "t1/../x",
+            "t 1",
+            "",
+        ],
+    )
     def test_path_injection_in_task_id_refused_before_the_call(self, bad, task_claim_enabled):
+        """FIRES. No respx route is registered and the autouse guard makes an
+        escape raise, so a refusal cannot pass by coincidence."""
         result = routes.claim_task(bad)
         assert result["ok"] is False
         assert result["error"]["type"] == "invalid_task_id"
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "fn,args",
+        [
+            (routes.claim_task, ("../lanes/converge",)),
+            (routes.heartbeat_task, ("../lanes/converge", "tok")),
+            (routes.finish_task, ("../lanes/converge", "tok", "done")),
+        ],
+    )
+    def test_lane_route_traversal_refused_on_all_three_task_tools(
+        self, fn, args, task_claim_enabled
+    ):
+        """The exploitable vector is refused on EVERY tool that interpolates
+        a task_id, not just the first one -- a guard applied to one of three
+        call sites is not a guard."""
+        assert fn(*args)["error"]["type"] == "invalid_task_id"
+
+    def test_the_traversal_guard_can_fail(self, task_claim_enabled):
+        """STAYS SILENT / POSITIVE CONTROL, in one test and without editing
+        the module: with the `..` rule removed, "../lanes/converge" passes
+        the bus's OWN charset -- which is the whole finding. The charset says
+        what an id may CONTAIN; it does not say the id is not a traversal."""
+        assert routes._TASK_ID_RE.match("../lanes/converge") is not None
+        assert routes._valid_task_id("../lanes/converge") is False
+        assert routes._valid_task_id("t1") is True
 
     @respx.mock
     def test_401_maps_to_typed_error(self, task_claim_enabled):
