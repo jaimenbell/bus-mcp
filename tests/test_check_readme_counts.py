@@ -68,16 +68,52 @@ def test_parse_claimed_counts_ignores_unrelated_badges():
 # parse_actual_counts -- from a pytest --junitxml report
 # ---------------------------------------------------------------------------
 
-_JUNIT_MATCH = """<?xml version="1.0" encoding="utf-8"?>
-<testsuites>
-<testsuite name="pytest" errors="0" failures="0" skipped="1" tests="89" time="7.9">
-</testsuite>
-</testsuites>
-"""
+def _make_junit(total, skipped=0, failures=0, errors=0, name="pytest"):
+    """Build a junitxml fixture whose <testcase> ELEMENTS actually match the
+    root <testsuite> summary attributes (skipped/failures/errors first, the
+    rest plain passes) -- so a fixture used to test the "claim matches
+    reality" path is not itself an instance of the root-attribute-lies bug
+    this lane is fixing. `_JUNIT_MISMATCHED_ROOT_COUNT` below is the one
+    fixture that deliberately disagrees."""
+    cases = []
+    i = 0
+    for _ in range(skipped):
+        cases.append(f'<testcase classname="c" name="skip{i}" time="0.0"><skipped/></testcase>')
+        i += 1
+    for _ in range(failures):
+        cases.append(f'<testcase classname="c" name="fail{i}" time="0.0"><failure message="x"/></testcase>')
+        i += 1
+    for _ in range(errors):
+        cases.append(f'<testcase classname="c" name="err{i}" time="0.0"><error message="x"/></testcase>')
+        i += 1
+    while i < total:
+        cases.append(f'<testcase classname="c" name="pass{i}" time="0.0"/>')
+        i += 1
+    body = "\n".join(cases)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<testsuites>\n"
+        f'<testsuite name="{name}" errors="{errors}" failures="{failures}" '
+        f'skipped="{skipped}" tests="{total}" time="7.9">\n'
+        f"{body}\n"
+        "</testsuite>\n"
+        "</testsuites>\n"
+    )
 
-_JUNIT_WITH_FAILURES = """<?xml version="1.0" encoding="utf-8"?>
+
+_JUNIT_MATCH = _make_junit(89, skipped=1)
+_JUNIT_WITH_FAILURES = _make_junit(89, skipped=1, failures=3)
+
+# THE POSITIVE-CONTROL FIXTURE for the root-attribute-vs-element-count fix:
+# the root <testsuite tests="5"> attribute LIES -- only 3 real <testcase>
+# elements exist in the body. A gate that trusts the attribute reports 5; a
+# gate that counts elements (the fix) reports 3.
+_JUNIT_MISMATCHED_ROOT_COUNT = """<?xml version="1.0" encoding="utf-8"?>
 <testsuites>
-<testsuite name="pytest" errors="0" failures="3" skipped="1" tests="89" time="7.9">
+<testsuite name="pytest" errors="0" failures="0" skipped="0" tests="5" time="1.0">
+<testcase classname="c" name="t1" time="0.0"/>
+<testcase classname="c" name="t2" time="0.0"/>
+<testcase classname="c" name="t3" time="0.0"/>
 </testsuite>
 </testsuites>
 """
@@ -96,6 +132,21 @@ def test_parse_actual_counts_subtracts_failures(tmp_path):
     actual = check_readme_counts.parse_actual_counts(junit_file)
     # 89 total - 1 skipped - 3 failures = 85 passed
     assert actual == check_readme_counts.Counts(total=89, passed=85, skipped=1)
+
+
+def test_parse_actual_counts_counts_testcase_elements_not_the_root_attr(tmp_path):
+    """POSITIVE CONTROL, half 1 (FIRES on the bug): the root <testsuite
+    tests="5"> attribute is wrong -- only 3 <testcase> elements are actually
+    in the file. The gate must report the real element count (3), never the
+    attribute (5). This is the CLAUDE.md rule 'the root tests= attr counts
+    SUBTESTS' made concrete: the attribute is pytest's own bookkeeping and
+    can drift from what the file body actually contains."""
+    junit_file = tmp_path / "junit.xml"
+    junit_file.write_text(_JUNIT_MISMATCHED_ROOT_COUNT, encoding="utf-8")
+    actual = check_readme_counts.parse_actual_counts(junit_file)
+    assert actual.total == 3
+    assert actual.passed == 3
+    assert actual.skipped == 0
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +206,36 @@ def test_main_exits_nonzero_on_drift(tmp_path):
 
     rc = check_readme_counts.main(["--readme", str(readme), "--junit-xml", str(junit)])
     assert rc != 0
+
+
+def test_the_root_attr_gate_fires_on_a_readme_that_trusts_the_lying_root_count(tmp_path):
+    """POSITIVE CONTROL, half 2 (FIRES): a README claiming the root
+    attribute's number (5, wrong) against the mismatched fixture (3 real
+    <testcase> elements) must be flagged as drift -- rc != 0."""
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "[![Tests](https://img.shields.io/badge/tests-5%20%285%20passing%2C%200%20skipped%29-brightgreen)](#testing)\n",
+        encoding="utf-8",
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(_JUNIT_MISMATCHED_ROOT_COUNT, encoding="utf-8")
+    rc = check_readme_counts.main(["--readme", str(readme), "--junit-xml", str(junit)])
+    assert rc != 0
+
+
+def test_the_root_attr_gate_stays_silent_on_a_readme_matching_the_real_element_count(tmp_path):
+    """POSITIVE CONTROL, half 2 (STAYS SILENT): a README claiming the real
+    element count (3) against the same mismatched-root fixture must pass --
+    the gate counts elements, so this is agreement, not drift."""
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "[![Tests](https://img.shields.io/badge/tests-3%20%283%20passing%2C%200%20skipped%29-brightgreen)](#testing)\n",
+        encoding="utf-8",
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(_JUNIT_MISMATCHED_ROOT_COUNT, encoding="utf-8")
+    rc = check_readme_counts.main(["--readme", str(readme), "--junit-xml", str(junit)])
+    assert rc == 0
 
 
 def test_main_exits_nonzero_on_missing_claim(tmp_path):

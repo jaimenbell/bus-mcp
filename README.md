@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-314%20%28313%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-332%20%28331%20passing%2C%201%20skipped%29-brightgreen)](#testing)
 [![Tools](https://img.shields.io/badge/tools-24-blue)](#tools)
 [![CI](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml)
 
@@ -71,7 +71,7 @@ agent and a human) hold one conversation with a beginning and an end.
 | Tool | Bus route | Purpose |
 |---|---|---|
 | `list_threads` | `GET /api/bus/threads` | Threads, newest first. **Omitting `status` excludes archived** -- ask for `status="archived"` separately |
-| `get_thread` | *composed* | One thread plus its messages. There is no by-id thread route, so this finds the thread in the list and filters that topic's messages client-side; check `scan_truncated` |
+| `get_thread` | `GET /api/bus/threads/{id}` | One thread plus its messages. Falls back to a client-side composition (`GET /threads` + a topic-filtered `GET /messages`) if the by-id route is absent or flagged dark -- check `composed` and, on a composed result, `scan_truncated` |
 | `open_thread` | `POST /api/bus/threads` | Open a thread + its root message. `opened_by` is the resolve authority afterwards; `kind="DECIDE"` marks a thread only the operator may resolve |
 | `reply_in_thread` | `POST /api/bus/message` | Reply inside a thread. `topic` is looked up from the thread when omitted |
 | `resolve_thread` | `POST /api/bus/threads/{id}/resolve` | Resolve a thread you opened. `resolved_by="operator"` is **refused client-side**; a `note` is posted as a thread reply first |
@@ -159,9 +159,11 @@ not declare. Passing them changes nothing about what comes back.
 
 They are wired anyway, deliberately: the server-side filters are a separate
 backend change, and when it lands these params start working with no change
-here and no version negotiation. Until then, filter client-side -- which is
-exactly what `get_thread` does, and why it reports `scanned` and
-`scan_truncated` rather than implying it saw the whole thread.
+here and no version negotiation. `get_thread` no longer needs this pattern for
+its own primary path (it calls the bus's `GET /threads/{id}` route directly as
+of 0.2.1) -- but its FALLBACK path still filters client-side exactly this way
+when that route is unavailable, which is why a composed result reports
+`scanned` and `scan_truncated` rather than implying it saw the whole thread.
 
 ## Typed errors, never a raw crash
 
@@ -314,6 +316,11 @@ python -m venv .venv
 Registered in `~/.claude.json` under `mcpServers.bus-mcp` as a stdio server
 invoking `run_server.py` by absolute path (no `cwd` needed -- the entrypoint
 adds its own directory to `sys.path`).
+
+**After merging a new version, an already-running Claude Code session is
+still talking to the OLD server process.** Run `/mcp` to reconnect (or start a
+new session) before relying on any behavior a new release changed --
+otherwise a fixed tool can look unfixed simply because nothing restarted it.
 
 ## Handshake check
 

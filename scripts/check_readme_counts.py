@@ -78,19 +78,27 @@ def parse_claimed_tool_count(readme_text: str) -> Optional[int]:
 
 def parse_actual_counts(junit_xml_path: Path) -> Counts:
     """Extract (total, passed, skipped) from a pytest --junitxml report.
-    passed = tests - failures - errors - skipped."""
+    passed = tests - failures - errors - skipped.
+
+    COUNTS <testcase> ELEMENTS DIRECTLY (ElementTree .iter), never the root
+    <testsuite tests="N"> attribute. The attribute is the producer's own
+    bookkeeping and can drift from what the file body actually contains --
+    the failure mode this gate exists to catch in README claims applies
+    equally to the artifact it reads. `.iter("testcase")` also walks the
+    WHOLE tree regardless of nesting, so a <testsuites> wrapping more than
+    one <testsuite> (the old code's `root.find("testsuite")` returns only
+    the first) is counted correctly too. skipped/failures/errors are
+    likewise read from each testcase's own child element
+    (<skipped>/<failure>/<error>), not trusted from the root's attributes,
+    for the same reason."""
     tree = ET.parse(junit_xml_path)
     root = tree.getroot()
-    # pytest's junit_family=xunit2 (the default) wraps <testsuite> in
-    # <testsuites>; handle both shapes.
-    suite = root if root.tag == "testsuite" else root.find("testsuite")
-    if suite is None:
-        raise ValueError(f"no <testsuite> element found in {junit_xml_path}")
+    testcases = list(root.iter("testcase"))
 
-    total = int(suite.get("tests", 0))
-    skipped = int(suite.get("skipped", 0))
-    failures = int(suite.get("failures", 0))
-    errors = int(suite.get("errors", 0))
+    total = len(testcases)
+    skipped = sum(1 for tc in testcases if tc.find("skipped") is not None)
+    failures = sum(1 for tc in testcases if tc.find("failure") is not None)
+    errors = sum(1 for tc in testcases if tc.find("error") is not None)
     passed = total - skipped - failures - errors
     return Counts(total=total, passed=passed, skipped=skipped)
 

@@ -370,21 +370,83 @@ def _find_thread(
     )
 
 
+# Bus body shapes that mean "this backend cannot answer the direct route
+# today" rather than "here is a real answer" -- both trigger the fallback
+# composition. A 404 is the older-backend case (route does not exist yet); a
+# 200 ok=False threads_disabled body is the route existing but
+# BUS_THREADS_ENABLED being off (coordination_bus.py get_thread_route).
+_THREAD_ROUTE_UNAVAILABLE_ERROR_TYPES = {"threads_disabled"}
+
+
 def get_thread(thread_id: int, limit: int = _SCAN_LIMIT) -> dict[str, Any]:
     """One thread plus its messages, oldest-first.
 
-    COMPOSED, NOT FETCHED -- and a caller must know it. The bus has no
-    GET /threads/{id} route and its GET /messages filters by `topic` only, so
-    this tool (1) finds the thread row in GET /threads, (2) reads
+    PRIMARY PATH (v0.2.1): one direct call to the bus's own
+    GET /threads/{id} route (landed 2026-09-10,
+    backend/coordination_bus.py `get_thread_route`) -- the bus's own
+    `_THREAD_COLUMNS`/`_message_dict` allowlists do the work this used to do
+    with two calls and a client-side filter. `thread_id` is coerced through
+    `_coerce_id` FIRST because it is now interpolated straight into the
+    request URL -- the same path-injection hazard `resolve_thread` guards
+    against, newly live here because the old composed lookup only ever
+    compared `thread_id` with Python `==` and never put it on a URL path.
+    A direct-route success carries `composed: False` plus the bus's own
+    `_meta` fields (`message_count`, `truncated`).
+
+    FALLBACK PATH: a 404 (an older backend with no by-id route) or a 200
+    ok=False `threads_disabled` body (the route exists but is flagged dark)
+    both retry the pre-0.2.1 client-side composition -- GET /threads plus a
+    topic-filtered GET /messages, `thread_id` matched client-side -- unchanged
+    in `_get_thread_composed` below. That result carries `composed: True` and
+    the original `scanned`/`scan_truncated` honesty fields: `scan_truncated`
+    True means older replies in the thread exist that the scan window did not
+    reach. Any OTHER error (a real 401/500) propagates untouched -- those mean
+    a genuine failure, not 'this route is unavailable', and falling back would
+    mask it behind a stale composed answer instead of surfacing it."""
+    coerced_id, id_err = _coerce_id(thread_id, "thread_id", "get_thread")
+    if id_err is not None:
+        return id_err
+    try:
+        result = client.get("get_thread", f"/threads/{coerced_id}", params={"limit": limit})
+    except client.BusApiError as exc:
+        if exc.status_code == 404:
+            return _get_thread_composed(thread_id, limit)
+        return _error_payload(exc)
+    except client.BusUnreachable as exc:
+        return _error_payload(exc)
+
+    error = result.get("error") or {}
+    if not result.get("ok", True) and error.get("type") in _THREAD_ROUTE_UNAVAILABLE_ERROR_TYPES:
+        return _get_thread_composed(thread_id, limit)
+    if not result.get("ok", True):
+        # A real, typed refusal from the bus body itself (200 status, ok=False)
+        # that is not one of the "route unavailable" cases above -- pass it
+        # through rather than reshaping it into the success envelope.
+        return {**result, "agent_id": config.get_agent_id()}
+
+    meta = result.get("_meta") or {}
+    return _ok(
+        {"thread": result.get("thread"), "messages": result.get("messages")},
+        message_count=meta.get("message_count"),
+        truncated=meta.get("truncated"),
+        composed=False,
+    )
+
+
+def _get_thread_composed(thread_id: int, limit: int) -> dict[str, Any]:
+    """The pre-0.2.1 client-side composition -- `get_thread`'s ONLY behavior
+    before the bus grew a by-id route, kept verbatim as the fallback for a
+    backend that predates it or has BUS_THREADS_ENABLED off.
+
+    COMPOSED, NOT FETCHED. The bus's GET /messages filters by `topic` only,
+    so this (1) finds the thread row in GET /threads, (2) reads
     GET /messages?topic=<the thread's topic> and keeps the rows whose
     `thread_id` matches. The filtering is CLIENT-SIDE.
 
     The consequence is returned as data rather than left to be discovered:
     `scanned` is how many topic messages were examined and `scan_truncated`
     is True when that hit the request ceiling -- with it True, older replies
-    in this thread exist that this call did not see. When the backend gains a
-    real by-id thread route (or a `thread_id` filter on GET /messages), this
-    composition becomes redundant and those fields go with it."""
+    in this thread exist that this call did not see."""
     thread, err = _find_thread("get_thread", thread_id)
     if err is not None:
         return err
@@ -399,7 +461,7 @@ def get_thread(thread_id: int, limit: int = _SCAN_LIMIT) -> dict[str, Any]:
         message_count=len(replies),
         scanned=len(scanned),
         scan_truncated=len(scanned) >= limit,
-        composed_client_side=True,
+        composed=True,
     )
 
 

@@ -174,10 +174,18 @@ class TestListThreads:
 
 
 # ---------------------------------------------------------------------------
-# get_thread -- the client-side composition
+# get_thread -- PRIMARY: direct GET /threads/{id}; FALLBACK: the pre-0.2.1
+# client-side composition, now factored into `_get_thread_composed` and
+# exercised directly here so the fallback mechanism and the fallback TRIGGER
+# (see TestGetThreadFallbackWiring below) are tested independently.
 # ---------------------------------------------------------------------------
 
-class TestGetThread:
+class TestGetThreadComposedFallback:
+    """Tests `_get_thread_composed` directly -- the exact pre-0.2.1 behavior
+    of `get_thread`, unchanged, now reachable only when the direct route is
+    absent or flagged dark. See TestGetThreadDirectRoute for proof that
+    `get_thread` actually falls into this on a 404 / threads_disabled."""
+
     @respx.mock
     def test_composes_thread_row_plus_its_messages_oldest_first(self):
         respx.get(f"{BASE}/threads").mock(
@@ -196,12 +204,12 @@ class TestGetThread:
                 ]},
             )
         )
-        result = routes.get_thread(2)
+        result = routes._get_thread_composed(2, routes._SCAN_LIMIT)
         assert result["ok"] is True
         assert result["thread"] == {"id": 2, "topic": "wave"}
         assert [m["id"] for m in result["messages"]] == [10, 12]
         assert result["message_count"] == 2
-        assert result["composed_client_side"] is True
+        assert result["composed"] is True
 
     @respx.mock
     def test_reads_messages_filtered_by_the_threads_own_topic(self):
@@ -213,7 +221,7 @@ class TestGetThread:
         msgs = respx.get(f"{BASE}/messages").mock(
             return_value=httpx.Response(200, json={"messages": []})
         )
-        routes.get_thread(2)
+        routes._get_thread_composed(2, routes._SCAN_LIMIT)
         assert msgs.calls.last.request.url.params["topic"] == "wave"
 
     @respx.mock
@@ -230,7 +238,7 @@ class TestGetThread:
                 200, json={"messages": [{"id": i, "thread_id": 2} for i in range(3)]}
             )
         )
-        result = routes.get_thread(2, limit=3)
+        result = routes._get_thread_composed(2, 3)
         assert result["scanned"] == 3
         assert result["scan_truncated"] is True
 
@@ -244,7 +252,7 @@ class TestGetThread:
         respx.get(f"{BASE}/messages").mock(
             return_value=httpx.Response(200, json={"messages": [{"id": 1, "thread_id": 2}]})
         )
-        assert routes.get_thread(2, limit=50)["scan_truncated"] is False
+        assert routes._get_thread_composed(2, 50)["scan_truncated"] is False
 
     @respx.mock
     def test_falls_back_to_the_archived_bucket(self):
@@ -261,7 +269,7 @@ class TestGetThread:
         respx.get(f"{BASE}/messages").mock(
             return_value=httpx.Response(200, json={"messages": []})
         )
-        result = routes.get_thread(2)
+        result = routes._get_thread_composed(2, routes._SCAN_LIMIT)
         assert result["ok"] is True
         assert result["thread"]["topic"] == "old"
 
@@ -272,7 +280,7 @@ class TestGetThread:
         respx.get(f"{BASE}/threads").mock(
             return_value=httpx.Response(200, json={"ok": True, "threads": []})
         )
-        result = routes.get_thread(999)
+        result = routes._get_thread_composed(999, routes._SCAN_LIMIT)
         assert result["ok"] is False
         assert result["error"]["type"] == "thread_not_visible"
         assert "does not exist" in result["error"]["reason"]
@@ -282,8 +290,167 @@ class TestGetThread:
         respx.get(f"{BASE}/threads").mock(
             return_value=httpx.Response(401, json={"detail": "nope"})
         )
-        result = routes.get_thread(2)
+        result = routes._get_thread_composed(2, routes._SCAN_LIMIT)
         assert result["error"]["status_code"] == 401
+
+
+class TestGetThreadDirectRoute:
+    """`get_thread`'s PRIMARY path as of 0.2.1: one direct
+    GET /threads/{id} call against the bus's own by-id route (landed
+    2026-09-10, backend/coordination_bus.py `get_thread_route`)."""
+
+    @respx.mock
+    def test_direct_route_success_returns_the_bus_shape_composed_false(self):
+        respx.get(f"{BASE}/threads/2").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "thread": {"id": 2, "topic": "wave"},
+                    "messages": [{"id": 10, "thread_id": 2, "body": "root"}],
+                    "_meta": {"message_count": 1, "limit": 200, "truncated": False},
+                },
+            )
+        )
+        result = routes.get_thread(2)
+        assert result["ok"] is True
+        assert result["thread"] == {"id": 2, "topic": "wave"}
+        assert [m["id"] for m in result["messages"]] == [10]
+        assert result["message_count"] == 1
+        assert result["truncated"] is False
+        assert result["composed"] is False
+
+    @respx.mock
+    def test_the_limit_argument_is_sent_as_a_query_param(self):
+        route = respx.get(f"{BASE}/threads/2").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ok": True, "thread": {"id": 2, "topic": "wave"}, "messages": [],
+                    "_meta": {"message_count": 0, "limit": 7, "truncated": False},
+                },
+            )
+        )
+        routes.get_thread(2, limit=7)
+        assert route.calls.last.request.url.params["limit"] == "7"
+
+    @respx.mock
+    def test_other_direct_route_errors_propagate_untouched_never_fall_back(self):
+        """A 500 (or a 401, if the route ever gets gated) is a REAL failure,
+        not a 'route absent' signal -- falling back here would mask it behind
+        a stale composed answer instead of surfacing it."""
+        respx.get(f"{BASE}/threads/2").mock(
+            return_value=httpx.Response(500, json={"detail": "boom"})
+        )
+        result = routes.get_thread(2)
+        assert result["ok"] is False
+        assert result["error"]["status_code"] == 500
+
+
+class TestGetThreadFallbackWiring:
+    """Proves `get_thread` actually falls into `_get_thread_composed` on the
+    two 'this backend cannot answer directly' signals: a genuine 404 (route
+    does not exist on an older backend) and a 200 ok=False threads_disabled
+    body (route exists but BUS_THREADS_ENABLED is off)."""
+
+    @respx.mock
+    def test_404_falls_back_to_composition_with_composed_true(self):
+        respx.get(f"{BASE}/threads/2").mock(
+            return_value=httpx.Response(
+                404, json={"ok": False, "error": {"type": "unknown_thread", "thread_id": 2}}
+            )
+        )
+        respx.get(f"{BASE}/threads").mock(
+            return_value=httpx.Response(
+                200, json={"ok": True, "threads": [{"id": 2, "topic": "wave"}]}
+            )
+        )
+        respx.get(f"{BASE}/messages").mock(
+            return_value=httpx.Response(
+                200, json={"messages": [{"id": 10, "thread_id": 2, "body": "root"}]}
+            )
+        )
+        result = routes.get_thread(2)
+        assert result["ok"] is True
+        assert result["composed"] is True
+        assert result["thread"] == {"id": 2, "topic": "wave"}
+        assert [m["id"] for m in result["messages"]] == [10]
+
+    @respx.mock
+    def test_threads_disabled_falls_back_to_composition(self):
+        respx.get(f"{BASE}/threads/2").mock(
+            return_value=httpx.Response(
+                200, json={"ok": False, "error": {"type": "threads_disabled"}}
+            )
+        )
+        respx.get(f"{BASE}/threads").mock(
+            return_value=httpx.Response(
+                200, json={"ok": True, "threads": [{"id": 2, "topic": "wave"}]}
+            )
+        )
+        respx.get(f"{BASE}/messages").mock(
+            return_value=httpx.Response(200, json={"messages": []})
+        )
+        result = routes.get_thread(2)
+        assert result["ok"] is True
+        assert result["composed"] is True
+
+    @respx.mock
+    def test_a_genuinely_absent_thread_after_fallback_still_reports_not_visible(self):
+        respx.get(f"{BASE}/threads/999").mock(
+            return_value=httpx.Response(
+                404, json={"ok": False, "error": {"type": "unknown_thread", "thread_id": 999}}
+            )
+        )
+        respx.get(f"{BASE}/threads").mock(
+            return_value=httpx.Response(200, json={"ok": True, "threads": []})
+        )
+        result = routes.get_thread(999)
+        assert result["ok"] is False
+        assert result["error"]["type"] == "thread_not_visible"
+
+
+class TestGetThreadNeverRaises:
+    """`thread_id` is now interpolated straight into the request URL
+    (GET /threads/{id}) -- the same path-injection hazard `resolve_thread`
+    guards against with `_coerce_id`. Reusing the exact adversarial literal
+    from the task-tool traversal fixture (tests/test_board.py's
+    '../lanes/converge') here: a thread_id normalizing to
+    '/api/bus/threads/../lanes/converge' would collapse to
+    '/api/bus/lanes/converge', a real route, if this were not refused
+    client-side first."""
+
+    @respx.mock
+    @pytest.mark.parametrize("bad", ["../lanes/converge", "abc", None, "", 0, -2, ["1"]])
+    def test_bad_thread_id_returns_an_error_dict_never_reaching_the_network(self, bad):
+        # No respx route registered for anything -- if the refusal ever
+        # leaked to the network, respx would raise instead of this
+        # coincidentally returning an ok=False-shaped dict.
+        result = routes.get_thread(bad)
+        assert result["ok"] is False
+        assert result["error"]["type"] == "invalid_id"
+        assert result["error"]["field"] == "thread_id"
+
+    @respx.mock
+    def test_the_traversal_guard_can_fail(self):
+        """POSITIVE CONTROL: without `_coerce_id`'s int-and->=1 check, a
+        non-numeric thread_id would sail straight into the URL. Pin the
+        guard's own mechanism, not just its outcome."""
+        assert routes._coerce_id("../lanes/converge", "thread_id", "get_thread")[0] is None
+
+    @respx.mock
+    def test_a_numeric_string_id_still_reaches_the_network(self):
+        route = respx.get(f"{BASE}/threads/2").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ok": True, "thread": {"id": 2, "topic": "wave"}, "messages": [],
+                    "_meta": {"message_count": 0, "limit": 200, "truncated": False},
+                },
+            )
+        )
+        assert routes.get_thread("2")["ok"] is True
+        assert route.called
 
 
 # ---------------------------------------------------------------------------

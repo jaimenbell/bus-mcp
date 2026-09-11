@@ -5,4 +5,4 @@ server.json hold the others); tests/test_version.py pins them together so
 they cannot drift.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

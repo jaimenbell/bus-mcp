@@ -170,12 +170,15 @@ async def list_threads_tool(status: str | None = None, limit: int = 50) -> dict:
 @mcp.tool(
     name="get_thread",
     description=(
-        "One thread plus its messages, oldest-first. COMPOSED CLIENT-SIDE: the "
-        "bus has no by-id thread route and its message read filters by topic "
-        "only, so this finds the thread in the thread list, reads that topic's "
-        "messages, and keeps the ones whose thread_id matches. Check "
-        "`scan_truncated` in the result -- when it is true, older replies in "
-        "the thread exist that this call could not see."
+        "One thread plus its messages, oldest-first. PRIMARY: one direct call "
+        "to the bus's own GET /threads/{id} route (result carries "
+        "`composed: false` plus `message_count`/`truncated`). FALLBACK: if "
+        "that route is absent (older backend) or flagged dark "
+        "(BUS_THREADS_ENABLED off), retries the old client-side composition "
+        "-- GET /threads + a topic-filtered GET /messages -- and the result "
+        "carries `composed: true` plus `scanned`/`scan_truncated`. Check "
+        "`scan_truncated` in a composed result -- when it is true, older "
+        "replies in the thread exist that this call could not see."
     ),
 )
 async def get_thread_tool(thread_id: int, limit: int = 500) -> dict:

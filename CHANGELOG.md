@@ -4,6 +4,30 @@ All notable changes to bus-mcp. Versions follow the package version in
 `pyproject.toml`, which `tests/test_version.py` pins against `server.json` and
 `bus_mcp.__version__` so the three cannot drift.
 
+## 0.2.1
+
+### Changed
+
+- **`get_thread` now calls the bus directly.** The bus grew its own
+  `GET /threads/{id}` route (backend/coordination_bus.py `get_thread_route`),
+  so `get_thread` calls it as the primary path -- one HTTP call instead of two
+  plus a client-side filter. A result from the direct route carries
+  `composed: false` plus the bus's own `message_count`/`truncated`. If the
+  route is absent (an older backend) or answers `threads_disabled`
+  (`BUS_THREADS_ENABLED` off), the tool falls back to the pre-0.2.1
+  client-side composition unchanged -- that result carries `composed: true`
+  plus `scanned`/`scan_truncated`. `thread_id` is coerced through the same
+  int->=1 guard `resolve_thread` already used, newly load-bearing here
+  because the direct path interpolates it straight into the request URL.
+- **The README count-verification gate now counts `<testcase>` elements**
+  (`scripts/check_readme_counts.py`), never the root `<testsuite tests="N">`
+  attribute. The attribute is the producer's own bookkeeping and can drift
+  from what the report body actually contains; counting elements directly
+  also correctly handles a `<testsuites>` wrapping more than one
+  `<testsuite>`, which the old `root.find("testsuite")` silently narrowed to
+  the first. Preventive -- no drift was observed against this repo's own
+  suite before the fix.
+
 ## 0.2.0
 
 The server wrapped messages, lanes and status, so an agent could broadcast
