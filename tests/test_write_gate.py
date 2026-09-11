@@ -37,6 +37,11 @@ WRITE_FN_ARGS = [
     (routes.vote, (5, "a1b2c3d4e5f6", "confirmed", "ref")),
     (routes.mint_dispatch, ("lane", "repo", "purpose")),
     (routes.report_dispatch, ("a1b2c3d4e5f6", "ref")),
+    # The dark three: task-claim gated AND write gated. With the write gate
+    # off they must answer as WRITES, which is what the stacking order buys.
+    (routes.claim_task, ("t1",)),
+    (routes.heartbeat_task, ("t1", "tok")),
+    (routes.finish_task, ("t1", "tok", "done")),
 ]
 
 

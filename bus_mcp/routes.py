@@ -12,6 +12,7 @@ for this call. See `config.get_agent_id`.
 from __future__ import annotations
 
 import re
+import secrets
 from typing import Any
 
 from . import client, config
@@ -41,6 +42,35 @@ def _invalid_lane_payload(lane: Any, tool: str) -> dict[str, Any]:
 
 def _valid_lane(lane: Any) -> bool:
     return isinstance(lane, str) and bool(_LANE_RE.match(lane))
+
+
+def _valid_task_id(task_id: Any) -> bool:
+    """Fail-closed path guard for a value interpolated into the request URL.
+
+    STRICTER THAN THE BUS'S OWN `_TASK_ID_PARAM` CHARSET, deliberately: that
+    pattern allows `.` and `/`, so `../../status` SATISFIES IT. The charset
+    describes what a task id may contain; it does not exclude a traversal
+    built out of those same characters. So `..` is rejected outright, as is a
+    leading or trailing separator. No legitimate minted task id contains
+    `..`, so this narrows nothing real."""
+    if not isinstance(task_id, str) or not _TASK_ID_RE.match(task_id):
+        return False
+    if ".." in task_id:
+        return False
+    return not (task_id.startswith("/") or task_id.endswith("/"))
+
+
+def _invalid_task_id_payload(task_id: Any, tool: str) -> dict[str, Any]:
+    return _client_error(
+        "invalid_task_id",
+        tool,
+        task_id=task_id,
+        reason=(
+            f"task_id must match {_TASK_ID_RE.pattern} (word chars, dot, "
+            "slash, hyphen, colon), must not contain '..', and must not start "
+            "or end with '/' -- it is interpolated into the request URL"
+        ),
+    )
 
 
 def _error_payload(exc: client.BusUnreachable | client.BusApiError) -> dict[str, Any]:
@@ -678,6 +708,225 @@ def report_dispatch(dispatch_id: str, report_ref: str) -> dict[str, Any]:
             "report_dispatch",
             f"/dispatches/{dispatch_id}/report",
             json={"report_ref": report_ref},
+        )
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+# --- task board ------------------------------------------------------------
+#
+# THERE IS DELIBERATELY NO TASK-MINTING TOOL. The bare task-collection POST
+# mints executable work and its auto class is authenticated by the OPERATOR
+# secret; minting stays a CLI/paste ritual the operator runs against a staged
+# file they have read. This client reads the board and -- only when a second
+# env gate is explicitly armed -- claims, heartbeats and finishes. The sweep
+# route is likewise absent: it is a maintenance operation that terminally
+# abandons other claimants' rows. Both paths are named only in
+# tests/test_rails_pins.py, which greps this package for them.
+
+
+def list_tasks_board(
+    status: str | None = None, limit: int | None = None, include_archived: bool = False
+) -> dict[str, Any]:
+    """The task board projection (GET /tasks/board, ungated).
+
+    `status` AND `limit` ARE APPLIED CLIENT-SIDE, and this is not a detail a
+    caller can ignore: the bus route takes ONE query param, `include_archived`,
+    and returns the whole board. Filtering here is therefore exact (the rows
+    were all fetched) but it is not a server-side page -- on a board that has
+    grown large the transfer is the full board either way.
+
+    `include_archived` is the real server-side param and is passed through.
+    Its default excludes rows the nightly archival sweep has aged out, which
+    is the only thing that sweep is for.
+
+    Every row is already narrowed by the bus's own board allowlist:
+    claim_token, verify_cmd, spec_path, repo, branch, note and posted_by never
+    leave the backend process on this route."""
+    params: dict[str, Any] = {}
+    if include_archived:
+        params["include_archived"] = True
+    try:
+        result = client.get("list_tasks_board", "/tasks/board", params=params or None)
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    tasks = result.get("tasks")
+    if not isinstance(tasks, list):
+        # The board is disabled or the shape is unfamiliar -- pass it through
+        # untouched rather than manufacturing an empty list.
+        return _ok(result)
+    filtered = [t for t in tasks if status is None or t.get("status") == status]
+    total = len(filtered)
+    if limit is not None:
+        filtered = filtered[:limit]
+    return _ok(
+        {**result, "tasks": filtered},
+        matched=total,
+        returned=len(filtered),
+        filtered_client_side=bool(status is not None or limit is not None),
+    )
+
+
+# The three task MUTATIONS below carry TWO gates, stacked: the ordinary write
+# gate outermost (so a write-disabled server still answers "writes are off",
+# the same answer it gives for every other write), and the task-claim gate
+# under it. See config.GROUP_TASK_CLAIM for why the second one exists.
+
+@config.gated_write
+@config.gated_task_claim
+def claim_task(
+    task_id: str,
+    owner: str | None = None,
+    claim_token: str | None = None,
+    lease_s: int | None = None,
+) -> dict[str, Any]:
+    """Claim a pending board task (POST /tasks/{id}/claim). DARK BY DEFAULT --
+    refuses unless BUS_MCP_ENABLE_TASK_CLAIM is armed.
+
+    `claim_token` is MINTED BY THE CALLER, not issued by the server: the bus
+    stores it as given so every later heartbeat/finish can prove ownership
+    without a round-trip to learn what was assigned. Omit it and this tool
+    mints a cryptographically random one -- IT IS RETURNED IN THE RESULT AND
+    IS NOT RECOVERABLE LATER (the board projection deliberately withholds
+    claim_token), so keep it for heartbeat_task/finish_task.
+
+    `lease_s` IS REFUSED, not ignored. The bus's TaskClaimRequest has exactly
+    two fields (owner, claim_token) and sets the lease server-side at 900s;
+    a lease_s sent on that body would be silently dropped and the caller would
+    heartbeat against a schedule nobody agreed to. Omit it.
+
+    A losing race is a value, not an exception: ok=False with
+    error.type='already_claimed_or_exhausted'."""
+    if lease_s is not None:
+        return _client_error(
+            "unsupported_parameter",
+            "claim_task",
+            parameter="lease_s",
+            reason=(
+                "the task claim route sets the lease server-side (900s) and its "
+                "request model has no lease field; a value passed here would be "
+                "silently dropped. Omit lease_s and heartbeat before it expires."
+            ),
+        )
+    if not _valid_task_id(task_id):
+        return _invalid_task_id_payload(task_id, "claim_task")
+    token = claim_token or secrets.token_hex(16)
+    try:
+        result = client.post(
+            "claim_task",
+            f"/tasks/{task_id}/claim",
+            json={"owner": _resolve_agent(owner), "claim_token": token},
+        )
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result, claim_token=token)
+
+
+@config.gated_write
+@config.gated_task_claim
+def heartbeat_task(
+    task_id: str,
+    claim_token: str,
+    want_running: bool = False,
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """Renew the lease on a task you hold (POST /tasks/{id}/heartbeat). DARK
+    BY DEFAULT -- refuses unless BUS_MCP_ENABLE_TASK_CLAIM is armed.
+
+    Renews only for the live (owner, claim_token) holder -- both are compared,
+    so a stale or borrowed token does not renew someone else's lease.
+    `want_running=True` additionally performs the ONE legal forward transition
+    this endpoint may make, claimed -> running; it maps to the bus's
+    `status: "running"` field and is OMITTED entirely when False (there is no
+    edge back, and sending a status the caller did not ask for is how one
+    appears)."""
+    if not _valid_task_id(task_id):
+        return _invalid_task_id_payload(task_id, "heartbeat_task")
+    payload: dict[str, Any] = {
+        "owner": _resolve_agent(owner),
+        "claim_token": claim_token,
+    }
+    if want_running:
+        payload["status"] = "running"
+    try:
+        result = client.post(
+            "heartbeat_task", f"/tasks/{task_id}/heartbeat", json=payload
+        )
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+@config.gated_write
+@config.gated_task_claim
+def finish_task(
+    task_id: str,
+    claim_token: str,
+    status: str,
+    exit_code: int | None = None,
+    verify_passed: bool | None = None,
+    note: str | None = None,
+    owner: str | None = None,
+    result_ref: str | None = None,
+) -> dict[str, Any]:
+    """Terminal write on a task you hold (POST /tasks/{id}/finish). DARK BY
+    DEFAULT -- refuses unless BUS_MCP_ENABLE_TASK_CLAIM is armed.
+
+    `status` is done / failed / needs_operator -- the bus types it as a
+    Literal, so anything else is a 422 rather than an unknown terminal state.
+    `verify_passed` is a SEPARATE fact from `status` and from `exit_code`: a
+    run can exit 0 with its verification unrun, and conflating the three is
+    how a green light gets attached to something nobody checked. Leave it None
+    when nothing verified rather than passing True."""
+    if not _valid_task_id(task_id):
+        return _invalid_task_id_payload(task_id, "finish_task")
+    payload = _compact({
+        "owner": _resolve_agent(owner),
+        "claim_token": claim_token,
+        "status": status,
+        "exit_code": exit_code,
+        "verify_passed": verify_passed,
+        "result_ref": result_ref,
+        "note": note,
+    })
+    try:
+        result = client.post("finish_task", f"/tasks/{task_id}/finish", json=payload)
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+# --- worker + events -------------------------------------------------------
+
+def get_worker_state() -> dict[str, Any]:
+    """The overnight task worker's last status heartbeat (GET /worker,
+    ungated).
+
+    MISSING IS NEVER ZERO, and the bus is careful about this: the backend does
+    not own the worker, so absence means 'cannot see', never 'nothing
+    happened'. Unmeasured fields come back null and the envelope carries
+    `status` + `age_s` + `as_of` so DATA AGE is data. An `unavailable` answer
+    is an honest answer, not an error."""
+    try:
+        result = client.get("get_worker_state", "/worker")
+    except (client.BusUnreachable, client.BusApiError) as exc:
+        return _error_payload(exc)
+    return _ok(result)
+
+
+def read_events(since: int = 0, limit: int = 50) -> dict[str, Any]:
+    """Cursor poll over the append-only event log (GET /events, ungated).
+
+    Rows come back ASCENDING by id -- the opposite order to read_messages, and
+    deliberately so: this is a cursor feed, not a recent-first view. Pass the
+    result's `cursor` as `since` on the next poll. An empty list is not an
+    error: it means caught up, or a fresh log. `cursor` is unchanged when
+    there were no new rows, so a client backing off during an outage needs no
+    special case."""
+    try:
+        result = client.get(
+            "read_events", "/events", params={"since": since, "limit": limit}
         )
     except (client.BusUnreachable, client.BusApiError) as exc:
         return _error_payload(exc)

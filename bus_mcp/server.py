@@ -143,7 +143,7 @@ async def get_bus_status_tool() -> dict:
     return routes.get_bus_status()
 
 
-# â”€â”€ v0.2.0: threads -- the conversation primitive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- v0.2.0: threads -- the conversation primitive ------------------------
 #
 # Topics stay the broadcast log; THREADS are how two agents (or an agent and
 # the operator) hold one conversation with a beginning and an end. Every tool
@@ -361,6 +361,119 @@ async def mint_dispatch_tool(
 async def report_dispatch_tool(dispatch_id: str, report_ref: str) -> dict:
     return routes.report_dispatch(dispatch_id, report_ref)
 
+
+# --- v0.2.0: task board, worker, events -----------------------------------
+#
+# NO TASK-MINTING TOOL and NO SWEEP TOOL exist here, deliberately: minting
+# executable work is an operator ritual against a staged file, and sweeping
+# terminally abandons other claimants' rows.
+
+
+@mcp.tool(
+    name="list_tasks_board",
+    description=(
+        "The task board (ungated read). NOTE: `status` and `limit` are applied "
+        "CLIENT-SIDE -- the bus route takes only include_archived and returns "
+        "the whole board, so filtering here is exact but is not a server-side "
+        "page. Sensitive columns (claim_token, verify_cmd, spec_path, repo, "
+        "branch, note, posted_by) never leave the backend on this route."
+    ),
+)
+async def list_tasks_board_tool(
+    status: str | None = None, limit: int | None = None, include_archived: bool = False
+) -> dict:
+    return routes.list_tasks_board(status, limit, include_archived)
+
+
+@mcp.tool(
+    name="claim_task",
+    description=(
+        "Claim a pending board task. DARK BY DEFAULT: refuses unless "
+        "BUS_MCP_ENABLE_TASK_CLAIM is armed, because the work-queue class "
+        "table names one claimant class and MCP sessions are not it yet. "
+        "`claim_token` is minted by the CALLER and returned in the result -- "
+        "keep it, the board projection will not give it back. `lease_s` is "
+        "refused, not ignored: the bus sets the lease server-side."
+    ),
+)
+async def claim_task_tool(
+    task_id: str,
+    owner: str | None = None,
+    claim_token: str | None = None,
+    lease_s: int | None = None,
+) -> dict:
+    return routes.claim_task(task_id, owner, claim_token, lease_s)
+
+
+@mcp.tool(
+    name="heartbeat_task",
+    description=(
+        "Renew the lease on a task you hold. DARK BY DEFAULT "
+        "(BUS_MCP_ENABLE_TASK_CLAIM). Renews only for the live "
+        "(owner, claim_token) holder. `want_running=True` performs the one "
+        "legal forward transition, claimed -> running; it is omitted from the "
+        "request entirely when False."
+    ),
+)
+async def heartbeat_task_tool(
+    task_id: str,
+    claim_token: str,
+    want_running: bool = False,
+    owner: str | None = None,
+) -> dict:
+    return routes.heartbeat_task(task_id, claim_token, want_running, owner)
+
+
+@mcp.tool(
+    name="finish_task",
+    description=(
+        "Terminal write on a task you hold: status is done/failed/"
+        "needs_operator. DARK BY DEFAULT (BUS_MCP_ENABLE_TASK_CLAIM). "
+        "`verify_passed` is a SEPARATE fact from status and exit_code -- a run "
+        "can exit 0 with its verification unrun. Leave it unset when nothing "
+        "verified rather than passing true."
+    ),
+)
+async def finish_task_tool(
+    task_id: str,
+    claim_token: str,
+    status: str,
+    exit_code: int | None = None,
+    verify_passed: bool | None = None,
+    note: str | None = None,
+    owner: str | None = None,
+    result_ref: str | None = None,
+) -> dict:
+    return routes.finish_task(
+        task_id, claim_token, status, exit_code, verify_passed, note, owner, result_ref
+    )
+
+
+@mcp.tool(
+    name="get_worker_state",
+    description=(
+        "The overnight task worker's last status heartbeat (ungated read). "
+        "MISSING IS NEVER ZERO: the backend does not own the worker, so "
+        "absence means 'cannot see', never 'nothing happened' -- unmeasured "
+        "fields are null and the envelope carries status/age_s/as_of so data "
+        "age is data. An 'unavailable' answer is honest, not an error."
+    ),
+)
+async def get_worker_state_tool() -> dict:
+    return routes.get_worker_state()
+
+
+@mcp.tool(
+    name="read_events",
+    description=(
+        "Cursor poll over the append-only event log (ungated read). Rows come "
+        "back ASCENDING by id -- the opposite order to read_messages, because "
+        "this is a cursor feed. Pass the result's `cursor` as `since` next "
+        "time. An empty list means caught up, not an error."
+    ),
+)
+async def read_events_tool(since: int = 0, limit: int = 50) -> dict:
+    return routes.read_events(since, limit)
 
 
 if __name__ == "__main__":

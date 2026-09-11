@@ -39,6 +39,12 @@ V2_TOOLS = {
     "list_dispatches",
     "mint_dispatch",
     "report_dispatch",
+    "list_tasks_board",
+    "claim_task",
+    "heartbeat_task",
+    "finish_task",
+    "get_worker_state",
+    "read_events",
 }
 
 EXPECTED_TOOLS = V1_TOOLS | V2_TOOLS
@@ -193,6 +199,46 @@ def test_mint_dispatch_tool_passthrough(fake_routes):
 def test_report_dispatch_tool_passthrough(fake_routes):
     asyncio.run(server.report_dispatch_tool("a1b2c3d4e5f6", "ref"))
     assert fake_routes["report_dispatch"] == (("a1b2c3d4e5f6", "ref"), {})
+
+
+def test_list_tasks_board_tool_passthrough(fake_routes):
+    asyncio.run(server.list_tasks_board_tool("pending", 5, True))
+    assert fake_routes["list_tasks_board"] == (("pending", 5, True), {})
+
+
+def test_claim_task_tool_passthrough(fake_routes):
+    asyncio.run(server.claim_task_tool("t1"))
+    assert fake_routes["claim_task"] == (("t1", None, None, None), {})
+
+
+def test_heartbeat_task_tool_passthrough(fake_routes):
+    asyncio.run(server.heartbeat_task_tool("t1", "tok", want_running=True))
+    assert fake_routes["heartbeat_task"] == (("t1", "tok", True, None), {})
+
+
+def test_finish_task_tool_passthrough(fake_routes):
+    asyncio.run(server.finish_task_tool("t1", "tok", "done", exit_code=0))
+    assert fake_routes["finish_task"] == (
+        ("t1", "tok", "done", 0, None, None, None, None), {})
+
+
+def test_get_worker_state_tool_passthrough(fake_routes):
+    asyncio.run(server.get_worker_state_tool())
+    assert fake_routes["get_worker_state"] == ((), {})
+
+
+def test_read_events_tool_passthrough(fake_routes):
+    asyncio.run(server.read_events_tool(since=5, limit=10))
+    assert fake_routes["read_events"] == ((5, 10), {})
+
+
+def test_dark_task_tool_descriptions_name_their_gate():
+    """A tool that refuses by default must SAY SO where an agent reads it --
+    the description is the only surface a model sees before calling."""
+    descriptions = _tool_descriptions()
+    for name in ("claim_task", "heartbeat_task", "finish_task"):
+        assert "BUS_MCP_ENABLE_TASK_CLAIM" in descriptions[name]
+        assert "DARK BY DEFAULT" in descriptions[name]
 
 
 def test_read_messages_description_states_the_ignored_filters():
