@@ -1,6 +1,11 @@
-"""Write-gate tests: the 4 mutating routes (post_message / claim_lane /
-release_lane / heartbeat_lane) must REFUSE locally when BUS_MCP_ENABLE_WRITE
-is unset (the production default), and only reach the network when it is set.
+"""Write-gate tests: EVERY mutating route must REFUSE locally when
+BUS_MCP_ENABLE_WRITE is unset (the production default), and only reach the
+network when it is set.
+
+The table below is the enforcement point, and `test_every_gated_route_is_in_
+the_table` is what stops it from silently lagging the module: a new write
+route that nobody added here would otherwise ship with a gate nothing ever
+proved fires.
 
 Mirrors github-mcp's tests/test_write.py structure. The `no_route` guard is
 the key safety assertion: no respx route is registered, so if the gate ever
@@ -23,6 +28,11 @@ WRITE_FN_ARGS = [
     (routes.claim_lane, ("feeds", "session-A")),
     (routes.release_lane, ("feeds", "session-A")),
     (routes.heartbeat_lane, ("feeds", "session-A")),
+    # v0.2.0 -- EVERY new write, no exceptions. A write tool absent from this
+    # table is a write tool whose gate has never been shown to fire.
+    (routes.open_thread, ("wave", "title", "body")),
+    (routes.reply_in_thread, (2, "body")),
+    (routes.resolve_thread, (2,)),
 ]
 
 
@@ -48,6 +58,32 @@ class TestConfigGate:
     def test_env_truthiness(self, monkeypatch, val, expected):
         monkeypatch.setenv("BUS_MCP_ENABLE_WRITE", val)
         assert config.group_enabled(config.GROUP_WRITE) is expected
+
+
+def gate_groups(fn) -> set[str]:
+    """Every gate wrapped around a route function, walking the decorator
+    chain outward-in."""
+    groups = set()
+    while fn is not None:
+        group = getattr(fn, "_gate_group", None)
+        if group is not None:
+            groups.add(group)
+        fn = getattr(fn, "__wrapped__", None)
+    return groups
+
+
+def test_every_gated_route_is_in_the_table():
+    """PARITY. Enumerates the write-gated functions in bus_mcp.routes and
+    asserts the table above covers all of them -- so adding a write route
+    without adding a gate test FAILS here rather than shipping a gate that
+    was never shown to fire."""
+    gated = {
+        name
+        for name, obj in vars(routes).items()
+        if callable(obj) and config.GROUP_WRITE in gate_groups(obj)
+    }
+    covered = {fn.__name__ for fn, _ in WRITE_FN_ARGS}
+    assert gated - covered == set(), f"write routes with no gate test: {gated - covered}"
 
 
 class TestGateRefusesWhenDisabled:

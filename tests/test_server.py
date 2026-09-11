@@ -15,7 +15,8 @@ import pytest
 from bus_mcp import config, server
 from bus_mcp.server import mcp
 
-EXPECTED_TOOLS = {
+# The v0.1.1 six -- the lane/message/status surface.
+V1_TOOLS = {
     "post_message",
     "read_messages",
     "claim_lane",
@@ -24,18 +25,38 @@ EXPECTED_TOOLS = {
     "get_bus_status",
 }
 
+# v0.2.0 -- threads, validations, dispatches, board, worker, events.
+V2_TOOLS = {
+    "list_threads",
+    "get_thread",
+    "open_thread",
+    "reply_in_thread",
+    "resolve_thread",
+}
+
+EXPECTED_TOOLS = V1_TOOLS | V2_TOOLS
+
 
 def _tool_names() -> set[str]:
     tools = asyncio.run(mcp.list_tools())
     return {t.name for t in tools}
 
 
-def test_all_six_bus_tools_registered():
+def test_all_expected_bus_tools_registered():
     assert _tool_names() == EXPECTED_TOOLS
 
 
 def test_no_unexpected_extra_tools():
-    assert len(_tool_names()) == 6
+    """An exact-set assertion, not a floor: a tool that appears here without
+    a row in the README table and a line in this set is an undocumented
+    surface on a public server."""
+    assert _tool_names() - EXPECTED_TOOLS == set()
+    assert EXPECTED_TOOLS - _tool_names() == set()
+
+
+def test_the_original_six_are_still_registered_unrenamed():
+    """v0.2.0 is ADDITIVE. Every pre-existing caller keeps its tool."""
+    assert V1_TOOLS <= _tool_names()
 
 
 def _tool_descriptions() -> dict[str, str]:
@@ -73,14 +94,7 @@ def fake_routes(monkeypatch):
 
         return _fn
 
-    for name in (
-        "post_message",
-        "read_messages",
-        "claim_lane",
-        "release_lane",
-        "heartbeat_lane",
-        "get_bus_status",
-    ):
+    for name in sorted(EXPECTED_TOOLS):
         monkeypatch.setattr(server.routes, name, _make(name))
     return calls
 
@@ -88,13 +102,55 @@ def fake_routes(monkeypatch):
 def test_post_message_tool_passthrough(fake_routes):
     result = asyncio.run(server.post_message_tool("t", "s", "b", action_flag=True))
     assert result == {"ok": True, "from": "post_message"}
-    assert fake_routes["post_message"] == (("t", "s", "b", True), {})
+    assert fake_routes["post_message"] == (("t", "s", "b", True, None, None, None), {})
+
+
+def test_post_message_tool_forwards_the_addressing_fields(fake_routes):
+    asyncio.run(
+        server.post_message_tool(
+            "t", "s", "b", action_flag=False, thread_id=2, reply_to=7, recipient="operator"
+        )
+    )
+    assert fake_routes["post_message"] == (("t", "s", "b", False, 2, 7, "operator"), {})
 
 
 def test_read_messages_tool_passthrough(fake_routes):
     result = asyncio.run(server.read_messages_tool(topic="converge", limit=10))
     assert result == {"ok": True, "from": "read_messages"}
-    assert fake_routes["read_messages"] == (("converge", 10), {})
+    assert fake_routes["read_messages"] == (("converge", 10, None, None, None), {})
+
+
+def test_read_messages_tool_forwards_the_new_filters(fake_routes):
+    asyncio.run(
+        server.read_messages_tool(thread_id=2, recipient="orchestrator", since_id=11)
+    )
+    assert fake_routes["read_messages"] == ((None, 50, 2, "orchestrator", 11), {})
+
+
+def test_list_threads_tool_passthrough(fake_routes):
+    assert asyncio.run(server.list_threads_tool("open", 5)) == {
+        "ok": True, "from": "list_threads"}
+    assert fake_routes["list_threads"] == (("open", 5), {})
+
+
+def test_get_thread_tool_passthrough(fake_routes):
+    assert asyncio.run(server.get_thread_tool(2)) == {"ok": True, "from": "get_thread"}
+    assert fake_routes["get_thread"] == ((2, 500), {})
+
+
+def test_open_thread_tool_passthrough(fake_routes):
+    asyncio.run(server.open_thread_tool("t", "ti", "b", kind="DECIDE"))
+    assert fake_routes["open_thread"] == (("t", "ti", "b", "DECIDE", None, None, False), {})
+
+
+def test_reply_in_thread_tool_passthrough(fake_routes):
+    asyncio.run(server.reply_in_thread_tool(2, "body", reply_to=9))
+    assert fake_routes["reply_in_thread"] == ((2, "body", 9, None, False, None, None), {})
+
+
+def test_resolve_thread_tool_passthrough(fake_routes):
+    asyncio.run(server.resolve_thread_tool(2, resolved_by="lane:a", note="n"))
+    assert fake_routes["resolve_thread"] == ((2, "lane:a", "n"), {})
 
 
 def test_claim_lane_tool_passthrough(fake_routes):
