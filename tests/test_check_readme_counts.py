@@ -155,3 +155,73 @@ def test_main_exits_nonzero_on_missing_claim(tmp_path):
 
     rc = check_readme_counts.main(["--readme", str(readme), "--junit-xml", str(junit)])
     assert rc != 0
+
+
+# ---------------------------------------------------------------------------
+# parse_claimed_tool_count + THE LIVE TOOL-COUNT GATE
+#
+# The test-count gate above runs in CI against a junit report. The tool count
+# has no junit report -- its artifact is the REGISTERED TOOL LIST, which means
+# importing the server. That import belongs in the suite, not in the
+# stdlib-only gate script, so the comparison lives here and CI gates on it by
+# running the suite.
+# ---------------------------------------------------------------------------
+
+_README_PATH = Path(__file__).resolve().parent.parent / "README.md"
+
+
+def test_parse_claimed_tool_count_matches_real_badge_phrasing():
+    readme = "[![Tools](https://img.shields.io/badge/tools-24-blue)](#tools)\n"
+    assert check_readme_counts.parse_claimed_tool_count(readme) == 24
+
+
+def test_parse_claimed_tool_count_missing_claim_returns_none():
+    assert check_readme_counts.parse_claimed_tool_count("# bus-mcp\n") is None
+
+
+def test_parse_claimed_tool_count_ignores_unrelated_badges():
+    readme = (
+        "[![Tests](https://img.shields.io/badge/tests-273%20%28272%20passing%2C%201"
+        "%20skipped%29-brightgreen)](#testing)\n"
+        "[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)\n"
+    )
+    assert check_readme_counts.parse_claimed_tool_count(readme) is None
+
+
+def test_readme_tool_badge_matches_the_live_registered_tool_count():
+    """THE GATE. Counts the tools the server actually registers and compares
+    that to the number the public README claims. Adding a tool without
+    touching the badge goes red here."""
+    import asyncio
+
+    from bus_mcp.server import mcp
+
+    actual = len(asyncio.run(mcp.list_tools()))
+    claimed = check_readme_counts.parse_claimed_tool_count(
+        _README_PATH.read_text(encoding="utf-8")
+    )
+    assert claimed is not None, "README has no Tools badge in the anchored phrasing"
+    assert claimed == actual, (
+        f"README claims {claimed} tools; the server registers {actual}"
+    )
+
+
+def test_readme_tools_table_has_a_row_for_every_registered_tool():
+    """A COUNT IS NOT COVERAGE. The badge can match while a tool has no row --
+    an undocumented tool on a public server. This checks the table itself."""
+    import asyncio
+
+    from bus_mcp.server import mcp
+
+    readme = _README_PATH.read_text(encoding="utf-8")
+    missing = [
+        t.name for t in asyncio.run(mcp.list_tools()) if f"`{t.name}`" not in readme
+    ]
+    assert missing == [], f"tools with no README mention: {missing}"
+
+
+def test_the_tool_count_gate_can_fail(tmp_path):
+    """POSITIVE CONTROL for the gate above: a README claiming the wrong number
+    must not parse as agreement."""
+    readme = "[![Tools](https://img.shields.io/badge/tools-1-blue)](#tools)\n"
+    assert check_readme_counts.parse_claimed_tool_count(readme) == 1

@@ -33,6 +33,19 @@ CLAIM_RE = re.compile(
     r"tests-(?P<total>\d+)%20%28(?P<passed>\d+)%20passing%2C%20(?P<skipped>\d+)%20skipped%29"
 )
 
+# The TOOL-count badge, same coupling rule as above:
+#
+#     [![Tools](https://img.shields.io/badge/tools-24-blue)](#tools)
+#
+# A tool count in a public README is a proof number: it is the first thing a
+# reader checks the repo against, and it rots the moment a tool is added. The
+# parser lives here beside the test-count parser so the README phrasing has
+# ONE place that knows it; the gate that compares it to the LIVE registered
+# tool list lives in tests/test_check_readme_counts.py, because counting
+# registered tools means importing the server and this script is stdlib-only
+# by design.
+TOOL_CLAIM_RE = re.compile(r"badge/tools-(?P<tools>\d+)-")
+
 
 @dataclass(frozen=True)
 class Counts:
@@ -53,6 +66,14 @@ def parse_claimed_counts(readme_text: str) -> Optional[Counts]:
         passed=int(match.group("passed")),
         skipped=int(match.group("skipped")),
     )
+
+
+def parse_claimed_tool_count(readme_text: str) -> Optional[int]:
+    """Extract the claimed tool count from the README's Tools badge, or None
+    if the anchored phrasing is not found -- a missing/renamed claim is a gate
+    failure, never a silent pass."""
+    match = TOOL_CLAIM_RE.search(readme_text)
+    return int(match.group("tools")) if match else None
 
 
 def parse_actual_counts(junit_xml_path: Path) -> Counts:
