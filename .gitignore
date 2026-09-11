@@ -8,3 +8,5 @@ dist/
 .env
 .env.*
 .claude.json.bak-*
+build/
+.claude/worktrees/
