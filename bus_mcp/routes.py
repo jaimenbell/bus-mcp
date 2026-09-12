@@ -880,9 +880,17 @@ def list_tasks_board(
 # config.BOARD_SENSITIVE_COLUMNS_TEXT -- is what keeps this docstring and
 # server.py's tool description from being two hand-typed copies of the same
 # list again.
-list_tasks_board.__doc__ = list_tasks_board.__doc__.format(
-    columns=config.BOARD_SENSITIVE_COLUMNS_TEXT
-)
+#
+# GUARD (code-review, verified 2026-09-12): `__doc__` is None, not the
+# literal string, when docstrings are stripped -- `python -OO` or
+# PYTHONOPTIMIZE=2. Formatting None crashed this whole module (and therefore
+# the MCP server) at import time under that flag before this guard existed
+# (`python -OO -c "import bus_mcp.routes"` -> AttributeError). Nothing to
+# format when there is no docstring to begin with, so skip cleanly instead.
+if list_tasks_board.__doc__ is not None:
+    list_tasks_board.__doc__ = list_tasks_board.__doc__.format(
+        columns=config.BOARD_SENSITIVE_COLUMNS_TEXT
+    )
 
 
 # The three task MUTATIONS below carry TWO gates, stacked: the ordinary write

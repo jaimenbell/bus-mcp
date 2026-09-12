@@ -38,12 +38,28 @@ DEFAULT_LEASE_S = 300
 # since that test asserts against a COMMITTED fixture, not a live call made
 # during the test run; a future new column still needs someone to recapture
 # the fixture.
+#
+# CORRECTED 2026-09-12 (code-review, verified against the live source): the
+# de-duplication that created this constant carried forward the SAME 7-column
+# list both files had hand-typed for a while -- but that list was itself
+# already stale against the backend's own canonical statement. alphahive
+# coordination_bus.py:3452-3453 and :5187-5188 both name TEN sensitive
+# columns -- "claim_token/verify_cmd/spec_path/contract_dirs/repo/branch/
+# rails_hash_at_claim/result_ref/note/posted_by" -- and all ten exist on the
+# `bus_tasks` table (coordination_bus.py:528-554). The 7-column version here
+# silently under-reported: `contract_dirs`, `rails_hash_at_claim`, and
+# `result_ref` were missing, so this package's own leak-detector could not
+# have caught a future regression exposing any of those three. Order and
+# membership below now match the backend's canonical list exactly.
 BOARD_SENSITIVE_COLUMNS: tuple[str, ...] = (
     "claim_token",
     "verify_cmd",
     "spec_path",
+    "contract_dirs",
     "repo",
     "branch",
+    "rails_hash_at_claim",
+    "result_ref",
     "note",
     "posted_by",
 )
