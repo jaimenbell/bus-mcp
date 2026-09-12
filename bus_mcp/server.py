@@ -385,8 +385,8 @@ async def report_dispatch_tool(dispatch_id: str, report_ref: str) -> dict:
         "The task board (ungated read). NOTE: `status` and `limit` are applied "
         "CLIENT-SIDE -- the bus route takes only include_archived and returns "
         "the whole board, so filtering here is exact but is not a server-side "
-        "page. Sensitive columns (claim_token, verify_cmd, spec_path, repo, "
-        "branch, note, posted_by) never leave the backend on this route."
+        f"page. Sensitive columns ({config.BOARD_SENSITIVE_COLUMNS_TEXT}) never "
+        "leave the backend on this route."
     ),
 )
 async def list_tasks_board_tool(

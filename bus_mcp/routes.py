@@ -848,8 +848,7 @@ def list_tasks_board(
     is the only thing that sweep is for.
 
     Every row is already narrowed by the bus's own board allowlist:
-    claim_token, verify_cmd, spec_path, repo, branch, note and posted_by never
-    leave the backend process on this route."""
+    {columns} never leave the backend process on this route."""
     params: dict[str, Any] = {}
     if include_archived:
         params["include_archived"] = True
@@ -872,6 +871,18 @@ def list_tasks_board(
         returned=len(filtered),
         filtered_client_side=bool(status is not None or limit is not None),
     )
+
+
+# `list_tasks_board.__doc__` above holds a `{columns}` placeholder rather than
+# an f-string: an f-string as the first statement of a function body is an
+# expression, not a literal constant, so Python does NOT set it as `__doc__`.
+# Formatting it here -- once, at import time, from the single shared
+# config.BOARD_SENSITIVE_COLUMNS_TEXT -- is what keeps this docstring and
+# server.py's tool description from being two hand-typed copies of the same
+# list again.
+list_tasks_board.__doc__ = list_tasks_board.__doc__.format(
+    columns=config.BOARD_SENSITIVE_COLUMNS_TEXT
+)
 
 
 # The three task MUTATIONS below carry TWO gates, stacked: the ordinary write

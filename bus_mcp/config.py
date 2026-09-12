@@ -20,6 +20,35 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8100/api/bus"
 DEFAULT_TIMEOUT_S = 10.0
 DEFAULT_LEASE_S = 300
 
+# --- Task-board sensitive-column allowlist (added 2026-09-11) -------------
+# The bus's own board projection (GET /tasks/board, coordination_bus.py)
+# narrows every row before it ever reaches this client -- these columns exist
+# on the backend's task record but never leave the backend process on that
+# route. This list used to be HAND-MAINTAINED, separately, in server.py's
+# `list_tasks_board` tool description AND routes.py's `list_tasks_board`
+# docstring, and it already drifted once: alphahive master@265106c1 added
+# `origin_thread_id` as the board's 15th key and this package only learned
+# about it because a human noticed, not because anything here checked.
+# ONE constant now, imported by both surfaces (server.py f-strings it into
+# the tool description; routes.py formats it into the docstring post-def,
+# since an f-string as the first statement of a function body is an
+# expression, not a literal, and Python will NOT set it as `__doc__`).
+# See tests/test_board_parity.py for the live-shape check this could not
+# have caught before -- and still cannot catch automatically going forward,
+# since that test asserts against a COMMITTED fixture, not a live call made
+# during the test run; a future new column still needs someone to recapture
+# the fixture.
+BOARD_SENSITIVE_COLUMNS: tuple[str, ...] = (
+    "claim_token",
+    "verify_cmd",
+    "spec_path",
+    "repo",
+    "branch",
+    "note",
+    "posted_by",
+)
+BOARD_SENSITIVE_COLUMNS_TEXT = ", ".join(BOARD_SENSITIVE_COLUMNS)
+
 # --- Write-tool gate (defense-in-depth, added 2026-07-19) -----------------
 # The 4 mutating tools (post_message / claim_lane / release_lane /
 # heartbeat_lane) are OFF by default and refuse locally unless
