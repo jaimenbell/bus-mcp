@@ -1,10 +1,10 @@
 {
   "_captured_at": "2026-09-12T01:41:29Z",
-  "_captured_from": "GET http://127.0.0.1:8100/api/bus/tasks/board",
-  "_note": "One REAL row, captured verbatim from the live coordination-bus board and committed as a parity fixture. Do not hand-edit the row below except deliberately, as part of re-capturing a new baseline -- see tests/test_board_parity.py. Nothing here was redacted: no sensitive-list column (see bus_mcp.config.BOARD_SENSITIVE_COLUMNS) appeared in the live response, so there was nothing to redact. The literal string '[REDACTED]' inside `title` was already present in the source row -- some upstream process redacted a filesystem path before posting the task, not this capture step.",
+  "_captured_from": "GET /api/bus/tasks/board",
+  "_note": "One row captured from a live coordination-bus board and committed as a parity fixture. The KEY SET is verbatim from the live response and is the thing under test (see tests/test_board_parity.py); free-text VALUES have been replaced with neutral placeholders, since no assertion reads them. No sensitive-list column (see bus_mcp.config.BOARD_SENSITIVE_COLUMNS) appeared in the live response, so none needed removing. When recapturing a new baseline, re-scrub the free-text values the same way.",
   "row": {
-    "task_id": "18d00760328945c9ac7dd71a0a25d4cb",
-    "title": "premise-check: pc-2026-09-11-conftest-depth - overnight-waves conftest.py sets _PROJECTS_ROOT = REPO_ROOT.parent, which resolves 3 levels short inside .claude/worktrees/[REDACTED], so pytest collection fails there without PYTHONPATH=C:/Users/jaime/projects (10 collection errors observed 2026-09-11 13:4x MDT).",
+    "task_id": "00000000000000000000000000000000",
+    "title": "premise-check: <title text scrubbed for publication>",
     "task_class": "auto",
     "status": "failed",
     "posted_at": "2026-09-11T21:23:25.503616+00:00",

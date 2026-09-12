@@ -881,7 +881,7 @@ def list_tasks_board(
 # server.py's tool description from being two hand-typed copies of the same
 # list again.
 #
-# GUARD (code-review, verified 2026-09-12): `__doc__` is None, not the
+# GUARD (code-review, verified 2026-09-11 MDT): `__doc__` is None, not the
 # literal string, when docstrings are stripped -- `python -OO` or
 # PYTHONOPTIMIZE=2. Formatting None crashed this whole module (and therefore
 # the MCP server) at import time under that flag before this guard existed
