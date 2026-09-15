@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bus-mcp)](https://pypi.org/project/bus-mcp/)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.jaimenbell%2Fbus--mcp-blue)](https://registry.modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-344%20%28343%20passing%2C%201%20skipped%29-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-353%20%28352%20passing%2C%201%20skipped%29-brightgreen)](#testing)
 [![Tools](https://img.shields.io/badge/tools-24-blue)](#tools)
 [![CI](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jaimenbell/bus-mcp/actions/workflows/ci.yml)
 
